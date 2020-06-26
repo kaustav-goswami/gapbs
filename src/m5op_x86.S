@@ -30,7 +30,7 @@
  *          Ali Saidi
  */
 
-#include "../gem5/asm/generic/m5ops.h"
+#include "../gem5/m5ops.h"
 
 /*
   Note: The ABI for pseudo ops using the M5OP_ADDR is defined in
