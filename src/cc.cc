@@ -14,7 +14,7 @@
 #include "graph.h"
 #include "pvector.h"
 #include "timer.h"
-
+#include "m5_mmap.h"
 
 /*
 GAP Benchmark Suite
@@ -223,5 +223,9 @@ int main(int argc, char* argv[]) {
   Graph g = b.MakeGraph();
   auto CCBound = [](const Graph& gr){ return Afforest(gr); };
   BenchmarkKernel(cli, g, CCBound, PrintCompStats, CCVerifier);
+  #ifdef HOOKS
+      std::cout<<"---------------------roi end--------------------" << '\n';
+      m5_work_end(0,0);
+  #endif
   return 0;
 }

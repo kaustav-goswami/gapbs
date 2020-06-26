@@ -16,7 +16,8 @@
 #include "timer.h"
 #include "util.h"
 #include "writer.h"
-
+#include "m5ops.h"
+#include "m5_mmap.h"
 
 /*
 GAP Benchmark Suite
@@ -101,6 +102,11 @@ void BenchmarkKernel(const CLApp &cli, const GraphT_ &g,
                      GraphFunc kernel, AnalysisFunc stats,
                      VerifierFunc verify) {
   g.PrintStats();
+  #ifdef HOOKS
+      map_m5_mem();
+      m5_work_begin(0,0);
+      std::cout<<"---------------------roi begin--------------------" << '\n';
+  #endif
   double total_seconds = 0;
   Timer trial_timer;
   for (int iter=0; iter < cli.num_trials(); iter++) {

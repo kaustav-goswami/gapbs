@@ -13,7 +13,7 @@
 #include "pvector.h"
 #include "sliding_queue.h"
 #include "timer.h"
-
+#include "m5_mmap.h"
 
 /*
 GAP Benchmark Suite
@@ -254,5 +254,9 @@ int main(int argc, char* argv[]) {
     return BFSVerifier(g, vsp.PickNext(), parent);
   };
   BenchmarkKernel(cli, g, BFSBound, PrintBFSStats, VerifierBound);
+  #ifdef HOOKS
+      std::cout<<"---------------------roi end--------------------" << '\n';
+      m5_work_end(0,0);
+  #endif
   return 0;
 }

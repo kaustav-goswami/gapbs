@@ -10,7 +10,7 @@
 #include "command_line.h"
 #include "graph.h"
 #include "pvector.h"
-
+#include "m5_mmap.h"
 
 /*
 GAP Benchmark Suite
@@ -106,5 +106,9 @@ int main(int argc, char* argv[]) {
     return PRVerifier(g, scores, cli.tolerance());
   };
   BenchmarkKernel(cli, g, PRBound, PrintTopScores, VerifierBound);
+  #ifdef HOOKS
+      std::cout<<"---------------------roi end--------------------" << '\n';
+      m5_work_end(0,0);
+  #endif
   return 0;
 }
