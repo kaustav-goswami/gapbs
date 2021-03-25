@@ -45,8 +45,10 @@ propagation phase.
 
 using namespace std;
 typedef float ScoreT;
+typedef double CountT;
 
-void PBFS(const Graph &g, NodeID source, pvector<NodeID> &path_counts,
+
+void PBFS(const Graph &g, NodeID source, pvector<CountT> &path_counts,
     Bitmap &succ, vector<SlidingQueue<NodeID>::iterator> &depth_index,
     SlidingQueue<NodeID> &queue) {
   pvector<NodeID> depths(g.num_nodes(), -1);
@@ -61,10 +63,8 @@ void PBFS(const Graph &g, NodeID source, pvector<NodeID> &path_counts,
     NodeID depth = 0;
     QueueBuffer<NodeID> lqueue(queue);
     while (!queue.empty()) {
-      #pragma omp single
-      depth_index.push_back(queue.begin());
       depth++;
-      #pragma omp for schedule(dynamic, 64)
+      #pragma omp for schedule(dynamic, 64) nowait
       for (auto q_iter = queue.begin(); q_iter < queue.end(); q_iter++) {
         NodeID u = *q_iter;
         for (NodeID &v : g.out_neigh(u)) {
@@ -74,14 +74,18 @@ void PBFS(const Graph &g, NodeID source, pvector<NodeID> &path_counts,
           }
           if (depths[v] == depth) {
             succ.set_bit_atomic(&v - g_out_start);
-            fetch_and_add(path_counts[v], path_counts[u]);
+            #pragma omp atomic
+            path_counts[v] += path_counts[u];
           }
         }
       }
       lqueue.flush();
       #pragma omp barrier
       #pragma omp single
-      queue.slide_window();
+      {
+        depth_index.push_back(queue.begin());
+        queue.slide_window();
+      }
     }
   }
   depth_index.push_back(queue.begin());
@@ -93,7 +97,7 @@ pvector<ScoreT> Brandes(const Graph &g, SourcePicker<Graph> &sp,
   Timer t;
   t.Start();
   pvector<ScoreT> scores(g.num_nodes(), 0);
-  pvector<NodeID> path_counts(g.num_nodes());
+  pvector<CountT> path_counts(g.num_nodes());
   Bitmap succ(g.num_edges_directed());
   vector<SlidingQueue<NodeID>::iterator> depth_index;
   SlidingQueue<NodeID> queue(g.num_nodes());
@@ -120,8 +124,7 @@ pvector<ScoreT> Brandes(const Graph &g, SourcePicker<Graph> &sp,
         ScoreT delta_u = 0;
         for (NodeID &v : g.out_neigh(u)) {
           if (succ.get_bit(&v - g_out_start)) {
-            delta_u += static_cast<ScoreT>(path_counts[u]) /
-                       static_cast<ScoreT>(path_counts[v]) * (1 + deltas[v]);
+            delta_u += (path_counts[u] / path_counts[v]) * (1 + deltas[v]);
           }
         }
         deltas[u] = delta_u;
@@ -167,7 +170,7 @@ bool BCVerifier(const Graph &g, SourcePicker<Graph> &sp, NodeID num_iters,
     // BFS phase, only records depth & path_counts
     pvector<int> depths(g.num_nodes(), -1);
     depths[source] = 0;
-    vector<NodeID> path_counts(g.num_nodes(), 0);
+    vector<CountT> path_counts(g.num_nodes(), 0);
     path_counts[source] = 1;
     vector<NodeID> to_visit;
     to_visit.reserve(g.num_nodes());
@@ -198,8 +201,7 @@ bool BCVerifier(const Graph &g, SourcePicker<Graph> &sp, NodeID num_iters,
       for (NodeID u : verts_at_depth[depth]) {
         for (NodeID v : g.out_neigh(u)) {
           if (depths[v] == depths[u] + 1) {
-            deltas[u] += static_cast<ScoreT>(path_counts[u]) /
-                         static_cast<ScoreT>(path_counts[v]) * (1 + deltas[v]);
+            deltas[u] += (path_counts[u] / path_counts[v]) * (1 + deltas[v]);
           }
         }
         scores[u] += deltas[u];
@@ -213,8 +215,10 @@ bool BCVerifier(const Graph &g, SourcePicker<Graph> &sp, NodeID num_iters,
   // Compare scores
   bool all_ok = true;
   for (NodeID n : g.vertices()) {
-    if (scores[n] != scores_to_test[n]) {
-      cout << n << ": " << scores[n] << " != " << scores_to_test[n] << endl;
+    ScoreT delta = abs(scores_to_test[n] - scores[n]);
+    if (delta > std::numeric_limits<ScoreT>::epsilon()) {
+      cout << n << ": " << scores[n] << " != " << scores_to_test[n];
+      cout << "(" << delta << ")" << endl;
       all_ok = false;
     }
   }

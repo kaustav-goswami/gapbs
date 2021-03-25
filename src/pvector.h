@@ -57,18 +57,26 @@ class pvector {
 
   // want move assignment
   pvector& operator= (pvector &&other) {
-    start_ = other.start_;
-    end_size_ = other.end_size_;
-    end_capacity_ = other.end_capacity_;
-    other.start_ = nullptr;
-    other.end_size_ = nullptr;
-    other.end_capacity_ = nullptr;
+    if (this != &other) {
+      ReleaseResources();
+      start_ = other.start_;
+      end_size_ = other.end_size_;
+      end_capacity_ = other.end_capacity_;
+      other.start_ = nullptr;
+      other.end_size_ = nullptr;
+      other.end_capacity_ = nullptr;
+    }
     return *this;
   }
 
-  ~pvector() {
-    if (start_ != nullptr)
+  void ReleaseResources(){
+    if (start_ != nullptr) {
       delete[] start_;
+    }
+  }
+
+  ~pvector() {
+    ReleaseResources();
   }
 
   // not thread-safe
@@ -83,6 +91,12 @@ class pvector {
       start_ = new_range;
       end_capacity_ = start_ + num_elements;
     }
+  }
+
+  // prevents internal storage from being freed when this pvector is desctructed
+  // - used by Builder to reuse an EdgeList's space for in-place graph building
+  void leak() {
+    start_ = nullptr;
   }
 
   bool empty() {
