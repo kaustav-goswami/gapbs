@@ -14,7 +14,6 @@
 #include "graph.h"
 #include "pvector.h"
 #include "timer.h"
-#include "m5_mmap.h"
 
 /*
 GAP Benchmark Suite

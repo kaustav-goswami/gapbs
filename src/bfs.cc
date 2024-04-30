@@ -13,7 +13,6 @@
 #include "pvector.h"
 #include "sliding_queue.h"
 #include "timer.h"
-#include "m5_mmap.h"
 
 /*
 GAP Benchmark Suite

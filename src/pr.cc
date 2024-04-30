@@ -10,7 +10,6 @@
 #include "command_line.h"
 #include "graph.h"
 #include "pvector.h"
-#include "m5_mmap.h"
 
 /*
 GAP Benchmark Suite

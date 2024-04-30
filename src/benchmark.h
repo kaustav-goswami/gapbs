@@ -16,8 +16,12 @@
 #include "timer.h"
 #include "util.h"
 #include "writer.h"
-#include "m5ops.h"
-#include "m5_mmap.h"
+
+// Define the header files if someone is compiling with HOOKS enabled.
+#ifdef HOOKS
+    #include <gem5/m5ops.h>
+    #include <m5_mmap.h>
+#endif
 
 /*
 GAP Benchmark Suite
@@ -104,18 +108,25 @@ void BenchmarkKernel(const CLApp &cli, const GraphT_ &g,
   g.PrintStats();
   double total_seconds = 0;
   Timer trial_timer;
+
+  // We need to set a m5_exit here to indicate that all initialization is done
+  // including memory allocation.
+#ifdef HOOKS
+  map_m5_mem();
+  m5_exit(0);
+#endif
+
   for (int iter=0; iter < cli.num_trials(); iter++) {
     trial_timer.Start();
-    #ifdef HOOKS
-      map_m5_mem();
+#ifdef HOOKS
       m5_work_begin(0,0);
       std::cout<<"---------------------roi begin--------------------" << '\n';
-    #endif
+#endif
     auto result = kernel(g);
-      #ifdef HOOKS
+#ifdef HOOKS
       std::cout<<"---------------------roi end--------------------" << '\n';
       m5_work_end(0,0);
-    #endif
+#endif
     trial_timer.Stop();
     PrintTime("Trial Time", trial_timer.Seconds());
     total_seconds += trial_timer.Seconds();
@@ -128,6 +139,11 @@ void BenchmarkKernel(const CLApp &cli, const GraphT_ &g,
       trial_timer.Stop();
       PrintTime("Verification Time", trial_timer.Seconds());
     }
+  // If the user wants to end the simulation after one ROI, then we should add
+  // another m5_exit;
+#ifdef EARLYEXIT
+  m5_exit(0);
+#endif
   }
   PrintTime("Average Time", total_seconds / cli.num_trials());
 }
