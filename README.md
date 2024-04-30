@@ -93,7 +93,17 @@ This sections explains gem5 HOOKS used to annotate this benchmark. This
 specific version of gapbs is hardcoded for arm64 compilation. However, changing
 the `Makefile` should do the trick.
 
-All the variables are set to compile with HOOKS enabled.
+First you need to clone and compile m5 util.
+```sh
+git clone git@github.com:gem5/gem5.git
+cd gem5
+export GEM5_HOME=`pwd`
+cd ext/m5
+scons build/arm64/out/m5 -j32   # Potential cross-compiler errors if
+                                # incorrectly set
+```
+Now, go back to the gapbs directory and compile gapbs. All the variables are
+set to compile with HOOKS enabled.
 ```sh
 make -j8
 ```
