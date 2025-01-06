@@ -351,7 +351,10 @@ class BuilderBase {
           el = r.ReadFile(needs_weights_);
         }
       } else if (cli_.scale() != -1) {
-        Generator<NodeID_, DestID_> gen(cli_.scale(), cli_.degree());
+        // kg: updated the constructor call to use the new Generator with node
+        // id as another parameter.
+        Generator<NodeID_, DestID_> gen(cli_.scale(), cli_.degree(),
+                                                            cli_.node_id());
         el = gen.GenerateEL(cli_.uniform());
       }
       g = MakeGraphFromEL(el);

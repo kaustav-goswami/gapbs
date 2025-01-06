@@ -37,7 +37,34 @@ class Generator {
   typedef pvector<Edge> EdgeList;
 
  public:
+  // kg: To be backward compatible, we are throwing an error when the user
+  // wants to invoke gapbs without specifying a node id.
   Generator(int scale, int degree) {
+      // kg: this fatally fails!
+      std::cout << "fatal: This is the disaggregated version of gapbs. " <<
+          "Please specify a node ID when invoking gapbs algorithms." <<
+          std::endl;
+      // The program is killed. All resources *should be* automatically
+      // released. Maybe?
+      // TODO
+      exit(-1);
+  }
+  Generator(int scale, int degree, int host_id) {
+    // kg: add a new variable to hold the host_id_
+    host_id_ = host_id;
+    // kg: make sure that the node ID is valid. Can't do much, but the value
+    // must always be >= 0.
+    if (host_id_ < 0) {
+        std::cout << "fatal: invalid node ID. Must be a positive number!" <<
+                                                                    std::endl;
+        exit(-1);
+    }
+    else if (host_id_ == 0)
+        // inform the user the host/node id and the role
+        std::cout << "info: This host is the master node!" << std::endl; 
+    else
+        std::cout << "info: This host is a worker node." << std::endl;
+
     scale_ = scale;
     num_nodes_ = 1l << scale;
     num_edges_ = num_nodes_ * degree;
@@ -148,6 +175,8 @@ class Generator {
   }
 
  private:
+  // kg: adding another variable to hold the node id in the generator function.
+  int host_id_;
   int scale_;
   int64_t num_nodes_;
   int64_t num_edges_;

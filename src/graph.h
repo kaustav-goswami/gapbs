@@ -13,6 +13,11 @@
 #include "pvector.h"
 #include "util.h"
 
+// kg: adding a dmalloc header to enable disaggregated memory allocations.
+// note that this is NOT an allocator in the traditional sense. We need a map
+// of a memory, not an entire fully-fledged memory allocator.
+#include "dmalloc.h"
+
 
 /*
 GAP Benchmark Suite

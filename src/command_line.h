@@ -33,13 +33,13 @@ class CLBase {
   int argc_;
   char** argv_;
   std::string name_;
-  
-  // kg: added a field `n` to specify node/host id.
-  std::string get_args_ = "n:f:g:hk:su:m";
+
+  // kg: added a field `x` to specify node/host id.
+  std::string get_args_ = "x:f:g:hk:su:m";
   std::vector<std::string> help_strings_;
 
   // kg: kg added a new field to specify the host id.
-  int node_id_; 
+  int host_id_; 
 
   int scale_ = -1;
   int degree_ = 16;
@@ -64,9 +64,9 @@ class CLBase {
  public:
   CLBase(int argc, char** argv, std::string name = "") :
          argc_(argc), argv_(argv), name_(name) {
-    // kg: A new line is needed to allow specifying the node id. Only the
-    // master node is allowed to allocate the graph.
-    AddHelpLine('n', "int", "specify the node id. 0 -> master");
+    // kg: A new line is needed to allow specifying the host id. Only the
+    // master host is allowed to allocate the graph.
+    AddHelpLine('x', "int", "specify the host id. 0 -> master");
     AddHelpLine('h', "", "print this help message");
     AddHelpLine('f', "file", "load graph from file");
     AddHelpLine('s', "", "symmetrize input edge list", "false");
@@ -95,7 +95,7 @@ class CLBase {
   void virtual HandleArg(signed char opt, char* opt_arg) {
     switch (opt) {
       // kg: handle the node id first.
-      case 'n': node_id_ = atoi(opt_arg);                   break;
+      case 'x': host_id_ = atoi(opt_arg);                   break;
       // kg: business as usual.
       case 'f': filename_ = std::string(opt_arg);           break;
       case 'g': scale_ = atoi(opt_arg);                     break;
@@ -116,7 +116,7 @@ class CLBase {
   }
 
   // kg: added a function to retrive the node id
-  int node_id() const { return node_id_; }
+  int host_id() const { return host_id_; }
   int scale() const { return scale_; }
   int degree() const { return degree_; }
   std::string filename() const { return filename_; }
