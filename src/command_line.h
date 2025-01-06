@@ -13,6 +13,9 @@
 #include <type_traits>
 #include <vector>
 
+// This is a fresh version of the code, where the stuff that works in the other
+// repository is copied over. All modifications have an associated comment.
+
 
 /*
 GAP Benchmark Suite
@@ -30,8 +33,13 @@ class CLBase {
   int argc_;
   char** argv_;
   std::string name_;
-  std::string get_args_ = "f:g:hk:su:m";
+  
+  // kg: added a field `n` to specify node/host id.
+  std::string get_args_ = "n:f:g:hk:su:m";
   std::vector<std::string> help_strings_;
+
+  // kg: kg added a new field to specify the host id.
+  int node_id_; 
 
   int scale_ = -1;
   int degree_ = 16;
@@ -56,6 +64,9 @@ class CLBase {
  public:
   CLBase(int argc, char** argv, std::string name = "") :
          argc_(argc), argv_(argv), name_(name) {
+    // kg: A new line is needed to allow specifying the node id. Only the
+    // master node is allowed to allocate the graph.
+    AddHelpLine('n', "int", "specify the node id. 0 -> master");
     AddHelpLine('h', "", "print this help message");
     AddHelpLine('f', "file", "load graph from file");
     AddHelpLine('s', "", "symmetrize input edge list", "false");
@@ -83,6 +94,9 @@ class CLBase {
 
   void virtual HandleArg(signed char opt, char* opt_arg) {
     switch (opt) {
+      // kg: handle the node id first.
+      case 'n': node_id_ = atoi(opt_arg);                   break;
+      // kg: business as usual.
       case 'f': filename_ = std::string(opt_arg);           break;
       case 'g': scale_ = atoi(opt_arg);                     break;
       case 'h': PrintUsage();                               break;
@@ -101,6 +115,8 @@ class CLBase {
     std::exit(0);
   }
 
+  // kg: added a function to retrive the node id
+  int node_id() const { return node_id_; }
   int scale() const { return scale_; }
   int degree() const { return degree_; }
   std::string filename() const { return filename_; }
