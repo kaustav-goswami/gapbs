@@ -169,8 +169,63 @@ class BuilderBase {
     }
   }
 
+  // // kg: we need a new method to SquishGraph with host ids enabled.
+  CSRGraph<NodeID_, DestID_, invert> SquishGraph(
+      const CSRGraph<NodeID_, DestID_, invert> &g, int host_id) {
+    
+    // kg: what do we want?
+    // the master node should be able to allocate the graph.
+    // the worker nodes will only work on the graph.
+
+    if (host_id == 0) {
+      DestID_ **out_index, *out_neighs, **in_index, *in_neighs;
+      SquishCSR(g, false, &out_index, &out_neighs);
+      if (g.directed()) {
+        if (invert) {
+          // kg: not taking any chances rn as I am disabling everything that
+          // I'm not verifying.
+          std::cout << "fatal: NotImplementedError! Cannot invert graph!" <<
+                  std::endl;
+          exit(-1);
+
+          // kg: unreachable code.
+          SquishCSR(g, true, &in_index, &in_neighs);
+        }
+        // kg: This should also be an unreachable code. I'll disable it for now
+        std::cout << "fatal: NotImplementedError! Cannot use directed graph!"
+                << std::endl;
+        exit(-1);
+
+        // kg: unreachable code.
+        return CSRGraph<NodeID_, DestID_, invert>(g.num_nodes(), out_index,
+                                                  out_neighs, in_index,
+                                                  in_neighs);
+      } else {
+        // kg: This is the only constructor we'll work with for npw.
+        return CSRGraph<NodeID_, DestID_, invert>(g.num_nodes(), out_index,
+                                                  out_neighs, host_id);
+      }
+    }
+    else {
+      // kg: this is a worker node. I'm not exactly sure what to do with it.
+      // for now, i am just fatally killing the worker!
+      std::cout << "fatal: NotImplementedError! IDK how to use the workers " <<
+          "without any of the graph's meta information. I am NOT " <<
+          "hardcoding anything RN." << std::endl;
+      exit(-1);
+    }
+  }
+
+  // kg: this is the original SquishGraph method, which needs to be disabled in
+  // order to get the disaggregated version of the code working.
   CSRGraph<NodeID_, DestID_, invert> SquishGraph(
       const CSRGraph<NodeID_, DestID_, invert> &g) {
+    
+    // kg: make sure to exit the program if invoked with this method.
+    std::cout << "fatal: please create a graph with a host_id." << std::endl;
+    exit(-1);
+
+    // kg: unreachable code.
     DestID_ **out_index, *out_neighs, **in_index, *in_neighs;
     SquishCSR(g, false, &out_index, &out_neighs);
     if (g.directed()) {
@@ -340,29 +395,56 @@ class BuilderBase {
   }
 
   CSRGraph<NodeID_, DestID_, invert> MakeGraph() {
+    // kg: This is the vanilla version of the method. must be fatally killed if
+    // called!
+    std::cout << "fatal: cannot call MakeGraph without a host_id!" <<
+          std::endl;
+    exit(-1);
+  }
+
+  CSRGraph<NodeID_, DestID_, invert> MakeGraph(int host_id) {
     CSRGraph<NodeID_, DestID_, invert> g;
     {  // extra scope to trigger earlier deletion of el (save memory)
       EdgeList el;
-      if (cli_.filename() != "") {
-        Reader<NodeID_, DestID_, WeightT_, invert> r(cli_.filename());
-        if ((r.GetSuffix() == ".sg") || (r.GetSuffix() == ".wsg")) {
-          return r.ReadSerializedGraph();
-        } else {
-          el = r.ReadFile(needs_weights_);
+
+      // kg: kg said that only the master is allowed. Needs to be verified once
+      // TODO
+      if (host_id == 0) {
+        if (cli_.filename() != "") {
+          Reader<NodeID_, DestID_, WeightT_, invert> r(cli_.filename());
+          if ((r.GetSuffix() == ".sg") || (r.GetSuffix() == ".wsg")) {
+            return r.ReadSerializedGraph();
+          } else {
+            el = r.ReadFile(needs_weights_);
+          }
+        } else if (cli_.scale() != -1) {
+          // kg: updated the constructor call to use the new Generator with
+          // node id as another parameter.
+          Generator<NodeID_, DestID_> gen(cli_.scale(), cli_.degree(),
+                                                              cli_.host_id());
+          el = gen.GenerateEL(cli_.uniform());
         }
-      } else if (cli_.scale() != -1) {
-        // kg: updated the constructor call to use the new Generator with node
-        // id as another parameter.
-        Generator<NodeID_, DestID_> gen(cli_.scale(), cli_.degree(),
-                                                            cli_.node_id());
-        el = gen.GenerateEL(cli_.uniform());
+        g = MakeGraphFromEL(el);
       }
-      g = MakeGraphFromEL(el);
+    else {
+      // kg: This is a worker node. IDK what to do with it RN.
+      std::cout << "fatal: IDK what to do with the worker node!" <<
+            std::endl;
+      exit(-1);
+
     }
-    if (in_place_)
+  }
+    if (in_place_) {
+      // kg: again, this feature is disabled.
+      std::cout << "fatal: NotImplementedError: cannot use in_place_!" <<
+            std::endl;
+      exit(-1);
+
+      // kg: unreachable code.
       return g;
+    }
     else
-      return SquishGraph(g);
+      return SquishGraph(g, host_id);
   }
 
   // Relabels (and rebuilds) graph by order of decreasing degree

@@ -147,6 +147,37 @@ class CSRGraph {
       num_edges_ = (out_index_[num_nodes_] - out_index_[0]) / 2;
     }
 
+  // kg: we need our own CSRGraph constructor that uses the host_ids correctly.
+  CSRGraph(int64_t num_nodes, DestID_** index, DestID_* neighs, // size_t index_y,
+          // DestID_* neighs, size_t neigh_size,
+          int host_id) :
+    directed_(false), num_nodes_(num_nodes) {
+      std::cout << "info: this is the right constructor!" << std::endl;
+      // kg: Make sure that the shared graph will be stored here and nothing
+      // else.
+      // goal: if this is the host then copy the contencts of the arrays to the
+      // the mmapped backed memory and notify the user.
+
+      // otherwise, return the pointers to the right part of the memory back to
+      // the user as these might be clients. the pointer must be int*
+      _mmap_pointer = hmalloc(1 << 30, host_id);
+
+      // need to assign size and data
+
+
+      // kg: once the data is assigned to the mmap space, we can freeup the
+      // arrays that the program uses.
+      free(index);
+      free(neighs);
+
+      // make sure that variables of this object needs to be backed by mmap
+      // memory.
+      // _graph_pointer = _hmalloc(1 << 30, host_id);
+      // this graph should not be 
+      num_edges_ = (out_index_[num_nodes_] - out_index_[0]) / 2;
+
+    }
+
   CSRGraph(int64_t num_nodes, DestID_** out_index, DestID_* out_neighs,
         DestID_** in_index, DestID_* in_neighs) :
     directed_(true), num_nodes_(num_nodes),
@@ -268,6 +299,7 @@ class CSRGraph {
   }
 
  private:
+  int *_mmap_pointer;
   bool directed_;
   int64_t num_nodes_;
   int64_t num_edges_;

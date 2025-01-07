@@ -233,7 +233,7 @@ int main(int argc, char* argv[]) {
   if (cli.num_iters() > 1 && cli.start_vertex() != -1)
     cout << "Warning: iterating from same source (-r & -i)" << endl;
   Builder b(cli);
-  Graph g = b.MakeGraph();
+  Graph g = b.MakeGraph(cli.host_id());
   SourcePicker<Graph> sp(g, cli.start_vertex());
   auto BCBound =
     [&sp, &cli] (const Graph &g) { return Brandes(g, sp, cli.num_iters()); };
