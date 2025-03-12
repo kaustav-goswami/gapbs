@@ -20,6 +20,10 @@
 #include "timer.h"
 #include "util.h"
 
+// kg: adding a dmalloc header to enable disaggregated memory allocations.
+// note that this is NOT an allocator in the traditional sense. We need a map
+// of a memory, not an entire fully-fledged memory allocator.
+#include "dmalloc.h"
 
 /*
 GAP Benchmark Suite
@@ -46,6 +50,19 @@ class BuilderBase {
   bool in_place_ = false;
   int64_t num_nodes_ = -1;
 
+  // kg: in this updated version of the shared gapbs, we maintain the allocator
+  // object in builder class rather than in the graph class.
+  // _______________________________________________________________ .. ______
+  // | synch_var (0) | **index | *neighs                                      |
+  // |_______________|_________|____________________________________ .. ______|
+  //
+  int *_mmap_pointer;
+  // kg: a synchronization variable is needed to make sure that the allocation
+  // is finished.
+  int *_synch_var;    // size = 1 x sizeof(int)
+  // kg: a new variable is used to maintain the host_id
+  int host_id;
+
  public:
   explicit BuilderBase(const CLBase &cli) : cli_(cli) {
     symmetrize_ = cli_.symmetrize();
@@ -54,6 +71,19 @@ class BuilderBase {
     if (in_place_ && needs_weights_) {
       std::cout << "In-place building (-m) does not support weighted graphs"
                 << std::endl;
+      exit(-30);
+    }
+    // kg: The builder class has the host_id as a cli. We'll use that as a new
+    // variable in this class constructor.
+    host_id = cli_.host_id();
+    // kg: inform the user whoami
+    if (host_id == 0)
+      std::cout << "info: I am the allocator node!" << std::endl;
+    else if (host_id > 0)
+      std::cout << "info: I am a worker node!" << std::endl;
+    else {
+      // This is an undefined host!
+      std::cout << "fatal: undefined host!" << std::endl;
       exit(-30);
     }
   }
