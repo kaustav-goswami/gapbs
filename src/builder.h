@@ -369,6 +369,16 @@ class BuilderBase {
                                                 inv_index, inv_neighs);
   }
 
+  // kg: Make sure that the default MakeGraph from vanilla gabps is disabled
+  // and the program fatally fails when called.
+  CSRGraph<NodeID_, DestID_, invert> MakeGraph() {
+    // kg: This is the vanilla version of the method. must be fatally killed if
+    // called!
+    std::cout << "fatal: cannot call MakeGraph without a host_id!" <<
+          std::endl;
+    exit(-1);
+  }
+
   CSRGraph<NodeID_, DestID_, invert> MakeGraph() {
     CSRGraph<NodeID_, DestID_, invert> g;
     {  // extra scope to trigger earlier deletion of el (save memory)
