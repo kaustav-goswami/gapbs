@@ -379,10 +379,21 @@ class BuilderBase {
     exit(-1);
   }
 
-  CSRGraph<NodeID_, DestID_, invert> MakeGraph() {
+  // kg: Design choice: Make sure that the user supplies the host_id explicitly
+  // The builder class has a private variable to store the host id but I don't
+  // want any bugs creeping into the code.
+  CSRGraph<NodeID_, DestID_, invert> MakeGraph(int host_id) {
+    // kg: sanity check
+    assert(host_id == this->host_id);
+    // kg: Do not use host_id again! Instead use this->host_id!
+
     CSRGraph<NodeID_, DestID_, invert> g;
     {  // extra scope to trigger earlier deletion of el (save memory)
+      // kg: The initial edgelist is empty.
       EdgeList el;
+      
+      // kg: kg said that only the master is allowed. Needs to be verified once
+
       if (cli_.filename() != "") {
         Reader<NodeID_, DestID_, WeightT_, invert> r(cli_.filename());
         if ((r.GetSuffix() == ".sg") || (r.GetSuffix() == ".wsg")) {
@@ -391,14 +402,38 @@ class BuilderBase {
           el = r.ReadFile(needs_weights_);
         }
       } else if (cli_.scale() != -1) {
-        Generator<NodeID_, DestID_> gen(cli_.scale(), cli_.degree());
-        el = gen.GenerateEL(cli_.uniform());
+        // kg: updated the constructor call to use the new Generator with
+        // node id as another parameter.
+        Generator<NodeID_, DestID_> gen(cli_.scale(), cli_.degree(),
+                                                            cli_.host_id());
+        // kg: If this is a allocator node, then it needs to generate the EL
+        if (this->host_id == 0) {
+          std::cout << "info: generating the EL for the allocator!"
+                    << std::endl; 
+          el = gen.GenerateEL(cli_.uniform());
+        }
+        else {
+          // do not do anything with the el.
+          std::cout << "info: skipping the EL for the worker!" << std::endl; 
+        }
       }
+      // kg: similar to the el generation, only the host needs to create the
+      // graph, the workers will read the graph and populate the index and
+      // neighs! see the MakeGraphFromEL() method on how this is addressed.
       g = MakeGraphFromEL(el);
-    }
-    if (in_place_)
+    } // close the extra scope!
+
+    if (in_place_){
+      // kg: again, this feature is disabled.
+      std::cout << "fatal: NotImplementedError: cannot use in_place_!" <<
+            std::endl;
+      exit(-1);
+
+      // kg: unreachable code.
       return g;
+    }
     else
+      // kg: So this is the only function called.
       return SquishGraph(g);
   }
 
