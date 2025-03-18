@@ -111,51 +111,72 @@ class Generator {
     return el;
   }
 
-  EdgeList MakeRMatEL() {
+  EdgeList MakeRMatEL(int *_mmap_pointer, int host_id) {
     std::cout << "info: Non-uniform EL is created!" << std::endl;
     const float A = 0.57f, B = 0.19f, C = 0.19f;
     EdgeList el(num_edges_);
-    #pragma omp parallel
-    {
-      static std::mt19937 rng;
-      static boost::random::uniform_real_distribution<> udist(0, 1.0f);
-      #pragma omp threadprivate(rng , udist)
-      #pragma omp for
-      for (int64_t block=0; block < num_edges_; block+=block_size) {
-        rng.seed(kRandSeed + block/block_size);
-        for (int64_t e=block; e < std::min(block+block_size, num_edges_); e++) {
-          NodeID_ src = 0, dst = 0;
-          for (int depth=0; depth < scale_; depth++) {
-            float rand_point = udist(rng);
-            src = src << 1;
-            dst = dst << 1;
-            if (rand_point < A+B) {
-              if (rand_point > A)
-                dst++;
-            } else {
-              src++;
-              if (rand_point > A+B+C)
-                dst++;
+
+    // EdgeList *eptr = (EdgeList *) &_mmap_pointer[1];
+
+    // if (host_id == 0) {
+      // el(num_edges_);
+      #pragma omp parallel
+      {
+        static std::mt19937 rng;
+        static boost::random::uniform_real_distribution<> udist(0, 1.0f);
+        #pragma omp threadprivate(rng , udist)
+        #pragma omp for
+        for (int64_t block=0; block < num_edges_; block+=block_size) {
+          rng.seed(kRandSeed + block/block_size);
+          for (int64_t e=block; e < std::min(block+block_size, num_edges_); e++) {
+            NodeID_ src = 0, dst = 0;
+            for (int depth=0; depth < scale_; depth++) {
+              float rand_point = udist(rng);
+              src = src << 1;
+              dst = dst << 1;
+              if (rand_point < A+B) {
+                if (rand_point > A)
+                  dst++;
+              } else {
+                src++;
+                if (rand_point > A+B+C)
+                  dst++;
+              }
             }
+            el[e] = Edge(src, dst);
+            // eptr[e] = el[e];
           }
-          el[e] = Edge(src, dst);
         }
       }
-    }
+//       // store the edgelist to the remote memory
+//  = (EdgeList *) &_mmap_pointer[1];
+//     // kg: the edge list ends at num_edges_
+//     // (num_edges_);
+//     if (host_id == 0) {
+//       for ()
+    // }
+    // else {
+    //   // kg: The edge list is already stored! Don't do anything?
+    //   for (int64_t block=0; block < num_edges_; block+=block_size) {
+    //     for (int64_t e=block; e < std::min(block+block_size, num_edges_); e++) {
+    //       el[e] = eptr[e];
+    //     }
+    //   }
+    // }
     PermuteIDs(el);
     // TIME_PRINT("Shuffle", std::shuffle(el.begin(), el.end(),
     //                                    std::mt19937()));
     return el;
   }
 
-  EdgeList GenerateEL(bool uniform) {
+  EdgeList GenerateEL(bool uniform, int *_mmap_pointer, int host_id) {
     EdgeList el;
     Timer t;
     t.Start();
     if (uniform)
       el = MakeUniformEL();
     else
-      el = MakeRMatEL();
+      el = MakeRMatEL(_mmap_pointer, host_id);
     t.Stop();
     PrintTime("Generate Time", t.Seconds());
     return el;

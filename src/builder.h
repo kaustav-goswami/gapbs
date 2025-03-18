@@ -63,6 +63,9 @@ class BuilderBase {
   // kg: a new variable is used to maintain the host_id
   int host_id;
 
+  // kg: We need a bunch of other sizes to maintain.
+  size_t el_size, og_neigh_size, og_index_size, squish_neigh_size, squish_index_size;
+
  public:
   explicit BuilderBase(const CLBase &cli) : cli_(cli) {
     symmetrize_ = cli_.symmetrize();
@@ -75,7 +78,9 @@ class BuilderBase {
     }
     // kg: The builder class has the host_id as a cli. We'll use that as a new
     // variable in this class constructor.
-    host_id = cli_.host_id();
+    this->host_id = cli_.host_id();
+    this->_mmap_pointer = shmalloc(1 >> 30, this->host_id);
+
     // kg: inform the user whoami
     if (host_id == 0)
       std::cout << "info: I am the allocator node!" << std::endl;
@@ -86,6 +91,12 @@ class BuilderBase {
       std::cout << "fatal: undefined host!" << std::endl;
       exit(-30);
     }
+    // kg: All the sizes are assigned to 0.
+    this->el_size = 0;
+    this->og_neigh_size = 0;
+    this->og_index_size = 0;
+    this->squish_neigh_size = 0;
+    this->squish_index_size = 0;
   }
 
   DestID_ GetSource(EdgePair<NodeID_, NodeID_> e) {
@@ -187,8 +198,13 @@ class BuilderBase {
       diffs[n] = new_end - n_start;
     }
     pvector<SGOffset> sq_offsets = ParallelPrefixSum(diffs);
-    *sq_neighs = new DestID_[sq_offsets[g.num_nodes()]];
-    *sq_index = CSRGraph<NodeID_, DestID_>::GenIndex(sq_offsets, *sq_neighs);
+
+    *sq_neighs = (DestID_ *) &this->_mmap_pointer[1 + this->el_size * sizeof(EdgeList) + this->og_neigh_size * sizeof(DestID_) + this->og_index_size * this->og_index_size * sizeof(DestID_)];
+
+    // *sq_neighs = new DestID_[sq_offsets[g.num_nodes()]];
+    this->squish_neigh_size = sq_offsets[g.num_nodes()];
+
+    *sq_index = CSRGraph<NodeID_, DestID_>::GenIndex(sq_offsets, *sq_neighs, sizeof(EdgeList), this->host_id, this->el_size, this->og_neigh_size, this->_mmap_pointer, this->og_index_size, this->squish_neigh_size);
     #pragma omp parallel for private(n_start)
     for (NodeID_ n=0; n < g.num_nodes(); n++) {
       if (transpose)
@@ -201,6 +217,7 @@ class BuilderBase {
 
   CSRGraph<NodeID_, DestID_, invert> SquishGraph(
       const CSRGraph<NodeID_, DestID_, invert> &g) {
+    // kg: this complicates everything!
     DestID_ **out_index, *out_neighs, **in_index, *in_neighs;
     SquishCSR(g, false, &out_index, &out_neighs);
     if (g.directed()) {
@@ -330,8 +347,18 @@ class BuilderBase {
                DestID_** neighs) {
     pvector<NodeID_> degrees = CountDegrees(el, transpose);
     pvector<SGOffset> offsets = ParallelPrefixSum(degrees);
-    *neighs = new DestID_[offsets[num_nodes_]];
-    *index = CSRGraph<NodeID_, DestID_>::GenIndex(offsets, *neighs);
+
+    // kg: try allocating the array.
+    *neighs = (DestID_ *) &this->_mmap_pointer[1 + this->el_size * sizeof(EdgeList)];
+    // *neighs = new DestID_[offsets[num_nodes_]];
+    this->og_neigh_size = offsets[num_nodes_];
+    this->og_index_size = offsets.size();
+    // this->_size_neighs = offsets[num_nodes_];
+
+    // kg: Let the GenIndex create the index array.
+    *index = CSRGraph<NodeID_, DestID_>::GenIndex(offsets, *neighs, sizeof(EdgeList),
+                      this->host_id, this->el_size, this->og_neigh_size, this->_mmap_pointer);
+
     #pragma omp parallel for
     for (auto it = el.begin(); it < el.end(); it++) {
       Edge e = *it;
@@ -343,20 +370,47 @@ class BuilderBase {
     }
   }
 
+  // kg: This is the method that we've been looking at all this time!
   CSRGraph<NodeID_, DestID_, invert> MakeGraphFromEL(EdgeList &el) {
+
+    // kg: TODO point these variables to the mmaped region, not mallocs!
     DestID_ **index = nullptr, **inv_index = nullptr;
     DestID_ *neighs = nullptr, *inv_neighs = nullptr;
+
+    // kg: make sure to allocate the graph. I don't want to take any risks.
+
+    // kg: Checkout the params.
+    // So the el will be deleted after this method is executed (pretty much).
+    std::cout << "info: host id:" << this->host_id <<
+            "; num nodes = " << num_nodes_ <<
+            "; needs_weights_ = " << needs_weights_ <<
+            "; in_place_ = " << in_place_ <<
+            "; symm = " << symmetrize_ <<
+            "; invert = " << invert << std::endl;
+
     Timer t;
     t.Start();
     if (num_nodes_ == -1)
       num_nodes_ = FindMaxNodeID(el)+1;
-    if (needs_weights_)
+    
+    this->el_size = num_nodes_ * cli_.degree();
+
+    if (needs_weights_) {
+      assert(false && "cannot add weights!");
       Generator<NodeID_, DestID_, WeightT_>::InsertWeights(el);
+    }
     if (in_place_) {
+      assert(false && "cannot create in place graph!");
       MakeCSRInPlace(el, &index, &neighs, &inv_index, &inv_neighs);
     } else {
+      // kg: This is the CSR that is called! figure out the sizes of index and
+      // the neighs here.
+      // TODO: Kill the program in any other method.
+      // kg: Make sure that index and neighs are allocated and written by the
+      // master and ONLY read by the workers.
       MakeCSR(el, false, &index, &neighs);
       if (!symmetrize_ && invert) {
+        assert(false && "cannot make inverted CSR!");
         MakeCSR(el, true, &inv_index, &inv_neighs);
       }
     }
@@ -364,9 +418,12 @@ class BuilderBase {
     PrintTime("Build Time", t.Seconds());
     if (symmetrize_)
       return CSRGraph<NodeID_, DestID_, invert>(num_nodes_, index, neighs);
-    else
+    else {
+      // kg: In synthetic graphs, this part of the code should never be called!
+      assert(false && "cannot make inverted weights!");
       return CSRGraph<NodeID_, DestID_, invert>(num_nodes_, index, neighs,
                                                 inv_index, inv_neighs);
+      }
   }
 
   // kg: Make sure that the default MakeGraph from vanilla gabps is disabled
@@ -401,21 +458,16 @@ class BuilderBase {
         } else {
           el = r.ReadFile(needs_weights_);
         }
-      } else if (cli_.scale() != -1) {
+      }
+      else if (cli_.scale() != -1) {
         // kg: updated the constructor call to use the new Generator with
         // node id as another parameter.
         Generator<NodeID_, DestID_> gen(cli_.scale(), cli_.degree(),
                                                             cli_.host_id());
         // kg: If this is a allocator node, then it needs to generate the EL
-        if (this->host_id == 0) {
-          std::cout << "info: generating the EL for the allocator!"
-                    << std::endl; 
-          el = gen.GenerateEL(cli_.uniform());
-        }
-        else {
-          // do not do anything with the el.
-          std::cout << "info: skipping the EL for the worker!" << std::endl; 
-        }
+        std::cout << "info: generating the EL for the allocator!"
+                  << std::endl;
+        el = gen.GenerateEL(cli_.uniform(), this->_mmap_pointer, this->host_id);
       }
       // kg: similar to the el generation, only the host needs to create the
       // graph, the workers will read the graph and populate the index and

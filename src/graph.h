@@ -10,6 +10,10 @@
 #include <iostream>
 #include <type_traits>
 
+#include <cassert>
+
+// #include "generator.h"
+
 #include "pvector.h"
 #include "util.h"
 
@@ -239,9 +243,29 @@ class CSRGraph {
     }
   }
 
+  // kg: updated method!
   static DestID_** GenIndex(const pvector<SGOffset> &offsets, DestID_* neighs) {
+    assert(false && "fatal: Use the updated GenIndex method!\n");
+    return nullptr;
+  }
+
+  static DestID_** GenIndex(const pvector<SGOffset> &offsets, DestID_* neighs, int edge_list_size,
+                int host_id, size_t el_size, size_t neigh_size, int *_mmap_pointer, size_t og_index_size = 0, size_t squish_index_size = 0) {
     NodeID_ length = offsets.size();
-    DestID_** index = new DestID_*[length];
+
+    DestID_** index = (DestID_ **) malloc (length * sizeof(DestID_ *));
+
+    // Make sure that the squishing hasn't happened yet!
+    if (squish_index_size == 0 && og_index_size == 0) {
+      for (int i = 0 ; i < length ; i++)
+        index[i] = (DestID_ *) &_mmap_pointer[1 + el_size * edge_list_size + neigh_size * sizeof(DestID_) + i * length * sizeof(DestID_)];
+    }
+    else {
+      // This is squished!   wow this is complex!    
+      for (int i = 0 ; i < length ; i++)
+        index[i] = (DestID_ *) &_mmap_pointer[1 + el_size * edge_list_size + neigh_size * sizeof(DestID_) + og_index_size * og_index_size * sizeof(DestID_) + squish_index_size * sizeof(DestID_) + i * length * sizeof(DestID_)];
+    }
+    // DestID_** index = new DestID_*[length];
     #pragma omp parallel for
     for (NodeID_ n=0; n < length; n++)
       index[n] = neighs + offsets[n];
