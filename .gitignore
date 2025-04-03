@@ -1,6 +1,8 @@
+allocator
 bc
 bfs
 cc
+cc_sv
 converter
 pr
 sssp

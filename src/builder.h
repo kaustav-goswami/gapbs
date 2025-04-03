@@ -164,10 +164,6 @@ class BuilderBase {
 
   void SquishCSR(const CSRGraph<NodeID_, DestID_, invert> &g, bool transpose,
                  DestID_*** sq_index, DestID_** sq_neighs) {
-  }
-  void SquishCSR(const CSRGraph<NodeID_, DestID_, invert> &g, bool transpose,
-                 DestID_*** sq_index, DestID_** sq_neighs, size_t *index_x,
-                 size_t *index_y, size_t* index_neighs) {
     pvector<NodeID_> diffs(g.num_nodes());
     // neighs_x = 
     DestID_ *n_start, *n_end;
@@ -213,7 +209,17 @@ class BuilderBase {
     std::cout << "info: prev_size = " << g.num_nodes() << std::endl;
   }
 
-  // // kg: we need a new method to SquishGraph with host ids enabled.
+  // kg: this is the original SquishGraph method, which needs to be disabled in
+  // order to get the disaggregated version of the code working.
+  CSRGraph<NodeID_, DestID_, invert> SquishGraph(
+      const CSRGraph<NodeID_, DestID_, invert> &g) {
+    
+    // kg: make sure to exit the program if invoked with this method.
+    std::cout << "fatal: please create a graph with a host_id." << std::endl;
+    exit(-1);
+  }
+
+  // kg: we need a new method to SquishGraph with host ids enabled.
   CSRGraph<NodeID_, DestID_, invert> SquishGraph(
       const CSRGraph<NodeID_, DestID_, invert> &g, int host_id) {
     
@@ -224,30 +230,20 @@ class BuilderBase {
     // kg: These structures should be filled up regardless of being the alloca-
     // tor or the worker nodes.
     DestID_ **out_index, *out_neighs, **in_index, *in_neighs;
-    // kg: We need to keep a track of the size of the out_index and also the
-    // out_neighs
-    size_t index_x, index_y, index_out_neighs;
     if (host_id == 0) {
       // kg: squishing will only be done by the allocator. The workers should
-      // not bother with this.
-      SquishCSR(g, false, &out_index, &out_neighs, &index_x, &index_y,
-                                                          &index_out_neighs);
+      // not bother with this!
+      SquishCSR(g, false, &out_index, &out_neighs);
       if (g.directed()) {
         if (invert) {
           // kg: not taking any chances rn as I am disabling everything that
           // I'm not verifying.
-          std::cout << "fatal: NotImplementedError! Cannot invert graph!" <<
-                  std::endl;
-          exit(-1);
-
+          assert(false && "fatal: Cannot invert graph\n");
           // kg: unreachable code.
           SquishCSR(g, true, &in_index, &in_neighs);
         }
         // kg: This should also be an unreachable code. I'll disable it for now
-        std::cout << "fatal: NotImplementedError! Cannot use directed graph!"
-                << std::endl;
-        exit(-1);
-
+        assert(false && "fatal: Directed graph detected\n");
         // kg: unreachable code.
         return CSRGraph<NodeID_, DestID_, invert>(g.num_nodes(), out_index,
                                                   out_neighs, in_index,
@@ -267,7 +263,10 @@ class BuilderBase {
                                     this->neighs_x, host_id, false);
       }
     }
-    else {
+    return CSRGraph<NodeID_, DestID_, invert>(g.num_nodes(), &out_index,
+                                    this->index_x, this->index_x, &out_neighs,
+                                    this->neighs_x, host_id, false);
+    /* else {
       // kg: this is a worker node. I'm not exactly sure what to do with it.
       // for now, i am just fatally killing the worker!
       std::cout << "warn: NotImplementedError! IDK how to use the workers " <<
@@ -288,35 +287,13 @@ class BuilderBase {
         assert(this->index_x != SIZE_MAX);
         // creatign a new constructor to 
         // int num_nodes = 1024;
-        return CSRGraph<NodeID_, DestID_, invert>(1024, &out_index,
+
+        // kg: The worker does not know the number of nodes in the graph, sizes
+        // of each of the arrays and the data.
+        return CSRGraph<NodeID_, DestID_, invert>(g.num_nodes(), &out_index,
                                     index_x, index_y, &out_neighs,
                               index_out_neighs, host_id, validate_graph); //' //', true);
-    }
-  }
-
-  // kg: this is the original SquishGraph method, which needs to be disabled in
-  // order to get the disaggregated version of the code working.
-  CSRGraph<NodeID_, DestID_, invert> SquishGraph(
-      const CSRGraph<NodeID_, DestID_, invert> &g) {
-    
-    // kg: make sure to exit the program if invoked with this method.
-    std::cout << "fatal: please create a graph with a host_id." << std::endl;
-    exit(-1);
-
-    // TODO Mark for deletion
-    // kg: unreachable code.
-    DestID_ **out_index, *out_neighs, **in_index, *in_neighs;
-    SquishCSR(g, false, &out_index, &out_neighs);
-    if (g.directed()) {
-      if (invert)
-        SquishCSR(g, true, &in_index, &in_neighs);
-      return CSRGraph<NodeID_, DestID_, invert>(g.num_nodes(), out_index,
-                                                out_neighs, in_index,
-                                                in_neighs);
-    } else {
-      return CSRGraph<NodeID_, DestID_, invert>(g.num_nodes(), out_index,
-                                                out_neighs);
-    }
+    } */
   }
 
   /*
@@ -473,20 +450,6 @@ class BuilderBase {
     // So the el will be deleted after this method is executed (pretty much).
 
     // Information is only available if the write node is calling this method.
-    // TODO Maked this for deletion! If this is a worker, then the number
-    // of nodes will never be calculated without the el!
-    /* 
-    if (host_id != 0) {
-      if (num_nodes_ == -1) {
-        num_nodes_ = FindMaxNodeID(el)+1;
-        std::cout << " - " <<  num_nodes_ << std::endl;
-      }
-      if (needs_weights_) {
-        // assert(false && "cannot add weights!");
-        Generator<NodeID_, DestID_, WeightT_>::InsertWeights(el);
-      }
-    }
-    */
 
     // Make sure that this is the writer node.
     if (host_id == 0) {

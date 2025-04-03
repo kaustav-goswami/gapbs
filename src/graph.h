@@ -20,9 +20,13 @@
 // of a memory, not an entire fully-fledged memory allocator.
 #include "dmalloc.h"
 
+#define INT64_T sizeof(int64_t)
 #define INT sizeof(int)
 #define SIZE_T sizeof(size_t)
 #define DESTID_ sizeof(DestID_)
+
+// There are four values, storing the metadata information of the graph!
+#define METADATA 4
 
 /*
 GAP Benchmark Suite
@@ -154,8 +158,10 @@ class CSRGraph {
     directed_(false), num_nodes_(num_nodes),
     out_index_(index), out_neighbors_(neighs),
     in_index_(index), in_neighbors_(neighs) {
-      // kg: relabel function
-      std::cout << "relabel" << std::endl;
+      // kg: relabel function. some kernels call this.
+      std::cout << "info: relabel function called!" << std::endl;
+      // we cannot calculate num_edges_ right now as these structures are all
+      // nullptr for the workers.
       // num_edges_ = (out_index_[num_nodes_] - out_index_[0]) / 2;
     }
 
@@ -164,7 +170,7 @@ class CSRGraph {
   // read from the /dev is the same.
   // TODO
   CSRGraph(int64_t num_nodes, DestID_*** index, size_t index_x, size_t index_y,
-        DestID_** neighs, size_t neigh_size, int host_id, bool validate_graph) :
+        DestID_** neighs, size_t neigh_size, int host_id, int validate_graph) :
     directed_(false), num_nodes_(num_nodes) {
       // kg: Make sure that the shared graph will be stored here and nothing
       // else.
@@ -183,72 +189,78 @@ class CSRGraph {
 
       // the start of the mmap array will be allocated to the start of index
       _synch_var = (int *) &_mmap_pointer[0];
-
-      if (host_id > 0) {
+      
+      if (host_id == 0) {
+        // set the metadata of the graph. There are 3 more metadata values
+        // the number of nodes
+        _num_nodes = (int64_t *) &_mmap_pointer[1];
+        _num_nodes[0] = num_nodes;
+        // size of the index_x.
+        _index_x = (size_t *) &_mmap_pointer[1 + INT64_T/INT];
+        _index_x[0] = index_x;
+        // size of neighs
+        _neigh_size = (size_t *) &_mmap_pointer[1 + INT64_T/INT + SIZE_T/INT];
+        _neigh_size[0] = neigh_size;
+      }
+      // kg: if i am a worker, then I pool on the synch. variable until it is
+      // set to 1.
+      else {
         std::cout << "info: waiting for master!" << std::endl;
         while (_synch_var[0] != 1) {}
         std::cout << "info: master has set the variable!" << std::endl;
+        std::cout << "info: reading graph metadata!" << std::endl;
+        _num_nodes = (int64_t *) &_mmap_pointer[1];
+        // num_nodes is a function argument but num_nodes_ was set when the
+        // contructor was called for the first time. The worker nodes does not
+        // know anything about it!
+        num_nodes = num_nodes_ = _num_nodes[0];
+        // size of the index_x.
+        _index_x = (size_t *) &_mmap_pointer[1 + INT64_T/INT];
+        index_x = _index_x[0];
+        // size of neighs
+        _neigh_size = (size_t *) &_mmap_pointer[1 + INT64_T/INT + SIZE_T/INT];
+        neigh_size = _neigh_size[0];
+
+        // I'm ready!!
       }
       
-      std::cout << "info: special malloc was called! sane ver: " << index_x << " " << index_y << " " << neigh_size << std::endl;
-      // std::cout << "value @ sync = " << _mmap_pointer[0] << std::endl;
       // need to assign size and data
-      assign_sizes(_mmap_pointer, index_x, index_y, neigh_size, host_id);
+      assign_sizes(_mmap_pointer, index_x, neigh_size, host_id);
       
       if (host_id == 0) {
         // The master needs to allocate and then populate the data.
-        assign_data(_mmap_pointer, *index, index_x, index_y, *neighs, neigh_size);
-       
+        assign_data(_mmap_pointer, *index, index_x, *neighs, neigh_size);
       }
-
       // update: We don't need to free these data structures in the allocator.
       // The allocator will do some algo as well.
 
       // kg: once the data is assigned to the mmap space, we can freeup the
-      // arrays that the program uses. THIS IS INCORRECT!!
-      // int dummy;
-      // std::cin >> dummy;
-      // free(index);
-      // free(neighs);
+      // arrays that the program uses. Ideally this is correct but I'm just
+      // lazy to free index and neigh and re-read them from the shared memory
+      // for the allocator node. So I'd assume that THIS IS INCORRECT!!
 
       // update: In case this is a worker node, it'll read the index and the
       // neighs from the mmap and then allocate the correct data into these
       // variables. ** This is not the right place **
-      else if (host_id > 0) {
+      else {
 
-        // TODO: Now read the index and the neighs from the pointer. This needs
+        // Now read the index and the neighs from the pointer. This needs
         // to work for the host and also for the workers as well. index and
         // neighs are both free pointers right now. Just reassign them from the
         // mmaped region
-        // assign_index_and_neighs(_mmap_pointer, index, index_x, neighs);
-        // for (size_t i = 0 ; i < index_x ; i++)
-          // out_index_ = index[i];
-        // *out_neighbors_ = neighs;
-        // *in_neighbors_ = neighs;
-        // if (index == nullptr) {
-        //   std::cout << "null!" << std::endl;
-        // }
-        // *index = (DestID_ **) malloc (index_x * sizeof(DestID_ *));
-        // for (size_t i = 0 ; i < index_x ; i++)
-        //   for (size_t j = 0 ; j < index_index_array[i]; j++)
-        //     index[i][j] = &out_index_[i][j];
         index = &out_index_;
         neighs = &out_neighbors_;
-
-        // probe_data(index_x);
-        
       }
 
-        // offset_reader(_mmap_pointer);
-
-      // print_data(index_x);
-      // offset_reader(_mmap_pointer, 0, index_x, neigh_size);
-      // print_neighs(neigh_size);
-      std::cout << "value @ sync = " << _mmap_pointer[0] << std::endl;
+      std::cout << "info: value at synch. location = " << _mmap_pointer[0]
+                                                                  << std::endl;
 
       // kg: sanity check. make sure that the graph stored in the mmap space
       // is indeed the graph as generated.
-      std::cout << "out index of the host " << host_id << " : " << *out_index_[num_nodes_] << " " << *out_index_[0] << " " << **index[0] << " " << num_nodes_ << std::endl;
+      std::cout << "out index of the host " << host_id << " : " << *out_index_[num_nodes_] << std::endl;
+      std::cout << " " << *out_index_[0] << std::endl;
+      std::cout << " " << **index[0] << std::endl;
+      std::cout << " " << num_nodes_ << std::endl;
       if (validate_graph == true) {
         // TODO
         std::cout << "fatal: NotImplementedError: Validation is pending!" <<
@@ -256,10 +268,7 @@ class CSRGraph {
         exit(-1);
 
       }
-      // num_edges_ = 10496;
       num_edges_ = (out_index_[num_nodes_] - out_index_[0]) / 2;
-      std::cout << "updated nodes: " << num_nodes_ << " edges: " << num_edges_
-          << std::endl;
 
     }
 
@@ -292,43 +301,32 @@ class CSRGraph {
   }
 
   // kg: defining new methods to manage the memory
-  void assign_sizes(int *_mmap, size_t index_x, size_t index_y, size_t neigh_size, int host_id) {
+  void assign_sizes(int *_mmap, size_t index_x, size_t neigh_size, int host_id) {
     // need to assign 2d pointers. regardless of the host_id, this step is true
     // for all hosts.
-    // For grid allocation, IDK how to do a mismatch of index_x and index_y
-    // assert(index_x == index_y);
 
-    out_neighbors_ = (DestID_ *) &_mmap[1]; //  + index_x * index_y]; // * sizeof(DestID_)];
+    // see the figure in the README to understand this mapping.
+    out_neighbors_ = (DestID_ *) &_mmap[1 + INT64_T/INT + (2 * SIZE_T)/INT];
     in_neighbors_ = out_neighbors_;
 
     // next we need to keep a track of all the y indices
-    index_index_array = (size_t *) &_mmap[1 + (neigh_size * DESTID_)/INT];
+    index_index_array = (size_t *) &_mmap[1 + INT64_T/INT + (2 * SIZE_T)/INT +
+                                                   (neigh_size * DESTID_)/INT];
 
 
     // This is a 2d array. we need a holder for the pointer pointer
     out_index_ = (DestID_ **) malloc (index_x * sizeof(DestID_ *));
     in_index_ = (DestID_ **) malloc (index_x * sizeof(DestID_ *));
 
-    // out_index_ = in_index_ = (DestID_ **) &_mmap[1];
-
-    // in_index_ = (DestID_ **) &_mmap[1];
-    if (host_id == 0) {
-      // man this is complicated! assign_Data already do this
-
-      // do nothing
-      for (size_t i = 0 ; i < index_x ; i++) {
-        // don't assign data but assign the sizes
-        // out_index_[i] = (DestID_ *) &_mmap[1 + (neigh_size * DESTID_)/INT + (index_x * SIZE_T)/INT + (i * index_y * DESTID_)/INT];
-        // std::cout << "out index at i " << i << " " << out_index_[i] << " " << 1 + neigh_size + index_x + i * index_y << std::endl;
-        // in_index_[i] = out_index_[i];
-        // in_index_[i] = (DestID_ *) &_mmap[i * index_y];
-      }
-    }
-    else {
+    // If i am the host, IDK the size of each row for the index array. We'll
+    // only know that once the data is allocated!
+    if (host_id > 0) {
+      // workers always have the sizes!
+      //
       // now that i have the sizes, i can reassign them. remember the first
       // element will start at the base i.e. +0!
-      out_index_[0] = (DestID_ *) &_mmap[1 + (neigh_size * DESTID_)/INT +
-                                                      (index_x * SIZE_T)/INT];
+      out_index_[0] = (DestID_ *) &_mmap[1 + INT64_T/INT + (2 * SIZE_T)/INT +
+                          (neigh_size * DESTID_)/INT + (index_x * SIZE_T)/INT];
       // the in_index_ is the same for these graphs! I'm doing another line for
       // this step for better understanding.
       in_index_[0] = out_index_[0];
@@ -338,77 +336,23 @@ class CSRGraph {
       // A new variable local_sum is needed to figure out the length of each
       // row
       size_t sum_local = 0;
-      std::cout << "info: the allocator is writing the index array to the shared"
-              << " memory! This may take some time..." << std::endl;
       
-      #pragma omp parallel for private(sum_local)
-      for (size_t i = 1 ; i < index_x ; i++) {
-        // make sure that the local sum is set to 0 for each loop.
-        sum_local = 0;
-        for (size_t j = 0 ; j < i ; j++) {
-          sum_local += index_index_array[j];
-        }
-        // TODO
-        // can there be a node without any edges? for an undirected graph, NO
-        // sanity check
-        assert(sum_local != 0);
-        out_index_[i] = (DestID_ *) &_mmap[1 + (neigh_size * DESTID_)/INT +
-                            (index_x * SIZE_T)/INT + (sum_local * DESTID_)/INT];
+      for (size_t i = 0 ; i < index_x ; i++) {
+
+        out_index_[i] = (DestID_ *) &_mmap[1 + INT64_T/INT + (2 * SIZE_T)/INT
+            + (neigh_size * DESTID_)/INT + (index_x * SIZE_T)/INT +
+            (sum_local * DESTID_)/INT];
         // finally set the in_index_ value
         in_index_[i] = out_index_[i];
+        sum_local += index_index_array[i];
       }
 
-      /*
-      #pragma omp parallel for
-      for (size_t i = 0 ; i < index_x ; i++) {
-        size_t sum = index_index_array[0];
-        
-
-        #pragma omp parallel for
-        for (size_t j = 1 ; j <= i ; j++)
-          sum += index_index_array[j];
-        // sanity check
-        assert(sum != 0);
-        out_index_[i] = (DestID_ *) &_mmap[1 + (neigh_size * DESTID_)/INT + (index_x * SIZE_T)/INT + (sum * DESTID_)/INT]; // index_index_array[i] * sizeof(DestID_)];
-
-        // std::cout << "out index at i " << i << " " << out_index_[i] << " " << 1 + (neigh_size * DESTID_)/INT + (index_x * SIZE_T)/INT + (sum * DESTID_)/INT << std::endl;
-        // std::cout << index_index_array[i] << " " << sum - index_index_array[0] << " "  << out_index_[i] << " " << out_index_[i] - out_index_[0] << std::endl;
-        in_index_[i] = out_index_[i];
-      }
-      */
     }
 
-    // assign neigh starting from the end of the index array.
-    std::cout << "assign neighs: " << index_x << " " << index_y << " " << index_x * index_y << " " << neigh_size << std::endl;
-    std::cout << "ptr: " << _mmap << " " << out_neighbors_ << " " << out_index_ << " " <<  out_index_[1024] - out_index_[0] << std::endl;
-  
-
-    // in_neighbors_ = (DestID_ *) &_mmap[index_x * index_y];
-
-    // this data should already be allocated.
-    
-    // make sure to allocate 
-
   }
 
-  void swap(size_t old_x, size_t old_y, size_t new_x, size_t new_y) {
-    auto value_at_old_index = out_index_[old_x][old_y];
-    auto value_at_new_index =  out_index_[new_x][new_y];
-
-    std::cout << value_at_old_index << " " << value_at_new_index << std::endl;
-
-     out_index_[new_x][new_y] = out_index_[old_x][old_y];
-  }
-
-  void worker_index_read(size_t index_x) {
-    // resize the array
-    for (size_t i = 0 ; i < index_x - 1 ; i++)
-      for (size_t j = 1 ; j <= index_index_array[i]; j++)
-        out_index_[i][j] = *out_index_[i * index_x + j];
-  }
-
-  void assign_data(int *_mmap, DestID_** index, size_t index_x, size_t index_y,
-    DestID_ *neighs, size_t neigh_size) {
+  void assign_data(int *_mmap, DestID_** index, size_t index_x,
+                                          DestID_ *neighs, size_t neigh_size) {
     // once every sinvle variable size is set, we only need to assign the data
     // only the master calls this function
     
@@ -423,18 +367,13 @@ class CSRGraph {
     // The final index is not necessary as there are index_x - 1 number
     // of nodes.
     #pragma omp parallel for
-    for (size_t i = 0 ; i < index_x - 1; i++) {
-      // std::cout << "out of i " << out_index_[i] << " diff " << std::endl;
-      // TODO
-      // the next index needs to be stored in the shmem. No need to type cast
-      // as this will be stored as a size_t element.
+    for (size_t i = 0 ; i < index_x - 1; i++)
       index_index_array[i] = (index[i + 1] - index[i]);
-    }
-
+    
     // now that i have the sizes, i can reassign them. remember the first elem-
     // ent will start at the base i.e. +0!
-    out_index_[0] = (DestID_ *) &_mmap[1 + (neigh_size * DESTID_)/INT +
-                                                      (index_x * SIZE_T)/INT];
+    out_index_[0] = (DestID_ *) &_mmap[1 + INT64_T/INT + (2 * SIZE_T)/INT
+                        + (neigh_size * DESTID_)/INT + (index_x * SIZE_T)/INT];
     // the in_index_ is the same for these graphs! I'm doing another line for
     // this step for better understanding.
     in_index_[0] = out_index_[0];
@@ -445,59 +384,17 @@ class CSRGraph {
     std::cout << "info: the allocator is writing the index array to the shared"
             << " memory! This may take some time..." << std::endl;
 
-    #pragma omp parallel for private(sum_local)
-    for (size_t i = 1 ; i < index_x ; i++) {
-      // make sure that the local sum is set to 0 for each loop.
-      sum_local = 0;
-      for (size_t j = 0 ; j < i ; j++) {
-        sum_local += index_index_array[j];
-      }
+    for (size_t i = 0 ; i < index_x ; i++) {
       // TODO
       // can there be a node without any edges? for an undirected graph, NO
-      // sanity check
-      assert(sum_local != 0);
-      out_index_[i] = (DestID_ *) &_mmap[1 + (neigh_size * DESTID_)/INT +
-                           (index_x * SIZE_T)/INT + (sum_local * DESTID_)/INT];
+      out_index_[i] = (DestID_ *) &_mmap[1 + INT64_T/INT + (2 * SIZE_T)/INT
+          + (neigh_size * DESTID_)/INT + (index_x * SIZE_T)/INT +
+          (sum_local * DESTID_)/INT];
       // finally set the in_index_ value
       in_index_[i] = out_index_[i];
+      // make sure that the local sum is updated for each loop.
+      sum_local += index_index_array[i];
     }
-
-    // set the final element!
-    // sum_local = 0;
-    //   for (size_t j = 0 ; j < index_x ; j++) {
-    //     sum_local += index_index_array[j];
-    //   }
-    // out_index_[i] = (DestID_ *) &_mmap[1 + (neigh_size * DESTID_)/INT +
-    //                        (index_x * SIZE_T)/INT + (sum_local * DESTID_)/INT];
-    
-
-
-    /*
-    size_t sum_local = 0;
-    #pragma omp parallel for private(sum_local)
-    for (size_t i = 1 ; i < index_x ; i++) {
-      sum_local = index_index_array[0];
-      // size_t sum = index_index_array[0];
-      
-      if (i % 100000 == 0)
-        std::cout << " 10 % " << std::endl;
-      for (size_t j = 1 ; j <= i ; j++)
-        sum_local += index_index_array[j];
-      // sanity check
-      if (sum_local == 0) {
-        std::cout << "fatal: zero sum seen at i = " << i << std::endl;
-      }
-      // assert(sum != 0);
-      out_index_[i] = (DestID_ *) &_mmap[1 + (neigh_size * DESTID_)/INT + (index_x * SIZE_T)/INT + (sum_local * DESTID_)/INT]; // index_index_array[i] * sizeof(DestID_)];
-
-      // std::cout << "out index at i " << i << " " << out_index_[i] << " " << 1 + (neigh_size * DESTID_)/INT + (index_x * SIZE_T)/INT + (sum * DESTID_)/INT << std::endl;
-      // std::cout << index_index_array[i] << " " << sum - index_index_array[0] << " "  << out_index_[i] << " " << out_index_[i] - out_index_[0] << std::endl;
-      in_index_[i] = out_index_[i];
-    }
-    */
-
-    // make sure that the index is written properly!
-    #pragma omp barrier
 
     // ready to write the memory!!!
     #pragma omp parallel for
@@ -520,57 +417,8 @@ class CSRGraph {
     _synch_var[0] = 1;
   }
 
-  void probe_data(size_t index_x) {
-    // kg: must be called by a worker node!
-    for (size_t i = 0 ; i < index_x - 1 ; i++) {
-      for (size_t j = 1 ; j <= index_index_array[i]; j++) {
-        if (out_index_[i][j] == 164) {
-          std::cout << "hhh " << i << " " << j << std::endl;
-        }
-        if (out_index_[i][j] != 0) {
-          std::cout << "non zero at " << i << " " << j << " with " << out_index_[i][j] << std::endl;
-        }
-      }
-    }
-  }
-
-void offset_reader(int *_mmap_pointer, size_t offset, size_t index_x, size_t neigh_size) {
-    // the first element is an integer
-    // the next element is of struct two
-    // size_t y = offset % ;
-    // size_t x = offset / DIMA;
-
-    // effective offset offsets the offset by a factor TWO/SIZE_T.
-    // This is because each element in struct two is of size_t and at
-    // each offset, there are two elements.
-    int size_factor = 1; // TWO/SIZE_T;
-
-    // need to find the base of the array
-    DestID_ *base = (DestID_ *) (_mmap_pointer + 1 + neigh_size + index_x); // + neigh_size * DESTID_/INT + index_x);
-
-    // there are two elements per offset (aka index)
-    for (int i = 0 ; i < neigh_size ; i++) {
-      // as int/DestID_
-      std::cout << (DestID_) (*(base + i)) << " ";
-      if (i % 1000 == 0)
-        std::cout << std::endl;
-    }
-    // std::cout << "(" << x << "," << y << ") :: @off = " << offset
-    //         << " { a " << (size_t *) (base + effective_offset) << " = "
-    //         << (size_t) (*(base + effective_offset))
-    //         << " b " << (size_t *) (base + effective_offset + 1)
-    //         <<  " = " << (size_t) (*(base + effective_offset + 1))
-    //         << " }" << std::endl;
-}
-
-  void offset_reader(int *_mmap_pointer) {
-      // does an int read
-      for (int i = 0 ; i < 0x40000000 / INT ; i++)
-        std::cout << "@off = " << i << " " << (int) (*(_mmap_pointer + i)) << std::endl;
-  }
-
   void print_data(size_t index_x) {
-    // kg: must be called by a worker node!
+    // kg: useful for debugging!
     for (size_t i = 0 ; i < index_x - 1 ; i++) {
       std::cout << i << "," << index_index_array[i] << "  ::  ";
       for (size_t j = 0 ; j < index_index_array[i]; j++) {
@@ -584,23 +432,12 @@ void offset_reader(int *_mmap_pointer, size_t offset, size_t index_x, size_t nei
   }
 
   void print_neighs(size_t neigh_size) {
+    // kg: useful for debugging!
     for (size_t i = 0 ; i < neigh_size ; i++) {
       std::cout << out_neighbors_[i] << " ";
       if (i % 1000 == 0)
         std::cout << std::endl;
     }
-  }
-
-  void assign_index_and_neighs(int *_mmap, DestID_** index, size_t index_x,
-    DestID_ *neighs) {
-    
-    // Just assign the given pointers from the mmaped region.
-    for (size_t i = 0 ; i < index_x ; i++)
-      index[i] = out_index_[i];
-    
-    // reassign the neighs here.
-    neighs = out_neighbors_;
-
   }
 
   CSRGraph& operator=(CSRGraph&& other) {
@@ -703,6 +540,9 @@ void offset_reader(int *_mmap_pointer, size_t offset, size_t index_x, size_t nei
  private:
   int *_mmap_pointer;
   int *_synch_var;
+  int64_t *_num_nodes;
+  size_t *_index_x;
+  size_t *_neigh_size;
   bool directed_;
   int64_t num_nodes_;
   int64_t num_edges_;

@@ -177,4 +177,12 @@ int* shmalloc(size_t size, int host_id) {
     return ptr;
 }
 
+void munmap_memory() {
+    // This is a hardcoded function which zeroes out the memory explictly
+    int *start = shmalloc(0x40000000 , 0); 
+    char *arr = (char *) &start[0];
+    for (size_t i = 0 ; i < 0x40000000 ; i++)
+        arr[i] = 0; 
+}
+
 #endif // DMALLOC_H
