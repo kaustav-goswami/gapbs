@@ -238,6 +238,8 @@ class CSRGraph {
       if (host_id == 0) {
         // The master needs to allocate and then populate the data.
         assign_data(_mmap_pointer, *index, index_x, *neighs, neigh_size);
+        // the master has done everything, just clflush the cache!
+        flush_x86_cache(_mmap_pointer, size_of_shmem);
       }
       // update: We don't need to free these data structures in the allocator.
       // The allocator will do some algo as well.

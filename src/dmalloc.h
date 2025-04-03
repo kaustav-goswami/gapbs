@@ -39,6 +39,15 @@
 
 #define ONE_G 0x40000000
 
+// an asm utility function on x86 to force flush the cache.
+[[gnu::unused]] static inline __attribute__((always_inline)) void clflushopt(volatile void *p) {
+    // @params
+    //
+    // p: a pointer to the memory
+    asm volatile("clflushopt (%0)\n"::"r"(p)
+    : "memory");
+}
+
 int* dmalloc(size_t size, int host_id) {
     // hehe, I love the name
     //
@@ -213,6 +222,20 @@ int* shmalloc(size_t size, int host_id) {
     return ptr;
 }
 
+void flush_x86_cache(int *_mmap_pointer, size_t size) {
+    // This function forces the entire mmapped region to be flushed out of the
+    // cache.
+    //
+    // @params
+    // :_mmap_pointer_: pointer to the start of the shared mapping area.
+    // :size: size of the shared memory region in GiB
+
+    size_t *_start = (size_t *) _mmap_pointer;
+    #pragma omp parallel for
+    for (size_t i = 0 ; i < (((size * ONE_G) / sizeof(size_t))) ; i += sizeof(size_t))
+        clflushopt((_start) + i);
+}
+
 void munmap_memory(size_t size, int test_mode, int host_id) {
     // This is a utility function to zero out the memory allocated to the graph
     // explicitly. This has to be called by any host. Security checks aren't
@@ -233,8 +256,8 @@ void munmap_memory(size_t size, int test_mode, int host_id) {
             start = dmalloc(size, host_id);
     }
     else {
-        std::cout << "warn: cannot munmap! Needs to be the allocator"
-                                                                << std::endl;
+        printf("warn: cannot munmap! Needs to be the allocator\n");
+        return;
     }
     // absolutely bad programming right here!
     char *arr = (char *) &start[0];

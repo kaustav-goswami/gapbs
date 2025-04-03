@@ -254,7 +254,5 @@ int main(int argc, char* argv[]) {
 	std::cout<<"---------------------roi end--------------------" << '\n';
 	m5_work_end(0,0);
   #endif
-  int dummy;
-  std::cin >> dummy;
   return 0;
 }

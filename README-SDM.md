@@ -7,7 +7,13 @@ Instead of a single system doing both the generation, allocation of the graph, a
 The use case for this setup is in shared disaggregated memory (like CXL 3.0+), where there will be multiple hosts sharing memory.
 Coherence across the hosts are software managed.
 The allocator makes sure that the data is coherently written to the shared memory.
-The reader hosts reads the graph from the remote/shared memory and allocates data structures needed for doing the kernel locally.
+The reader hosts read the graph from the remote/shared memory and allocates data structures needed for doing the kernel locally.
+
+The allocator can be configured to zero out the shared memory space in the beginning.
+Further, the allocator always calls `clflushopt` to flush the entire shared memory region onto the memory, enforcing cache coherence.
+Maybe in the future, this will be changed to a `M_SYNC`-like flag when the device is `open`.
+
+See the example section on how to get started ASAP!
 
 ## Limitations
 
@@ -16,40 +22,42 @@ The reader hosts reads the graph from the remote/shared memory and allocates dat
 
 ## An explanation on how GAPBS work
 
+TL;DR: This section is only important if you want to understand/make changes to the source.
+
 I hope this section will be a good documentation for people who want to make changes to the GAPBS benchmark.
 
 1. Each graph kernel has a separate source file (`src/bc.cc` `src/bfs.cc` `src/cc.cc` `src/pr.cc` `src/tc.cc` `src/sssp.cc`)
 2. A graph is generated for each kernel first, based on the input provided by the user (`defined in src/command_line.h`).
-3. To understand how a new commandline argument is added, see the comments for specifying the host ID (-x).
+3. To understand how a new command line argument is added, see the comments for specifying the host ID (-x).
 4. The file `src/builder.cc` is pretty much responsible for creating the graph.
-    1. There are a bunch of unitlity functions to get the meta data of the graph.
+    1. There are a bunch of utility functions to get the meta-data of the graph.
     2. `pvector` is the data structures that GAPBS use everywhere which is defined in `src/pvector.h`.
-    3. The template DestID_ stores most of the graph information in *active* memory.
-    4. The first method called in builder class (BuilderBase; will just refer to as the builder class) to create a graph is `MakeGraph()`.
-    5. An EdgeList data type is used to create and store edge information of the graph.
+    3. The template `DestID_` stores most of the graph information in *active* memory.
+    4. The first method called in builder class (`BuilderBase`; will just refer to as the builder class) to create a graph is `MakeGraph()`.
+    5. An `EdgeList` data type is used to create and store edge information of the graph.
     6. If you want to use a synthetic graph, the Generator class' `GenerateEL()` method randomly generates an edge list.
     7. In my understanding, the version of GAPBS that I used (from/for gem5), the random seeds are the same, making the graph same across different runs.
     8. The method `MakeGraphFromEL()` is called with the el object, which was just created.
-    9. The variable `el` is simply passed around until the neighbors (neighs, DestID_) and index (index, DestID_ x DestID_) arrays are generated.
+    9. The variable `el` is simply passed around until the neighbors (neighs, `DestID_`) and index (index, `DestID_` x `DestID_`) arrays are generated.
     10. The neighs and index are created in `MakeGraphFromEL()` as null pointers in the beginning.
     11. A synthetically generated graph will NOT have the inv_* variables used (unless specified I guess).
     12. A graph read from a file WILL have them set.
     13. `needs_weights` is pretty much relevant for `sssp`.
-    14. MakeCSR() method assigns values to the neighs and index arrays.
+    14. `MakeCSR()` method assigns values to the neighs and index arrays.
     15. The size of neighs is `offsets[num_nodes_]`.
     16. The number of rows that index has is `offsets.size()`.
     17. The length of each row is variable.
-    18. MakeCSR() method creates an unoptimized copy of the graph in the memory.
-    19. The flow then goes back to the MakeGraph() method.
+    18. `MakeCSR()` method creates an unoptimized copy of the graph in the memory.
+    19. The flow then goes back to the `MakeGraph()` method.
     20. The `el` variable is destroyed as soon as the arrays are stored in the memory.
-    21. The Graph class onject `g` is initially initialized to pretty much NULL (see `src/graph.h` Graph::CSRGraph() constructor).
+    21. The Graph class object `g` is initially initialized to pretty much NULL (see `src/graph.h` `Graph::CSRGraph()` constructor).
     22. Command line parameters that are relevant are: graph file name (filename()), uniform(), `in_place_`, directed(), and weights.
-    23. There is an extra scope added to make sure that the EdgeList object `el` is deleted after the arrays are generated for the first time.
+    23. There is an extra scope added to make sure that the `EdgeList` object `el` is deleted after the arrays are generated for the first time.
     24. From what I understand, the Graph object stores the neighs and index within its scope.
-    25. `SquishGraph(Graph object)` is called with the Graph object `g`, which then calls SquishCSR method since hte graph is in CSR format.
+    25. `SquishGraph(Graph object)` is called with the Graph object `g`, which then calls `SquishCSR` method since the graph is in CSR format.
     26. Note that there are DestID_ pointers to the neighs and index arrays, which are used to squish the graph.
-    27. By squishing (in SquishCSR()), the author means to create an *optimized* copy of the graph to store in the memory (I might be wrong).
-    28. The final versions of neighs and index are generated in SquishCSR() method.
+    27. By squishing (in `SquishCSR()`), the author means to create an *optimized* copy of the graph to store in the memory (I might be wrong).
+    28. The final versions of neighs and index are generated in `SquishCSR()` method.
     29. The builder class' objectives are done.
 5. The graph's structure as a class is written in Graph class.
     1. The flow then goes to the Graph class in `src/graph.c`.
@@ -62,13 +70,13 @@ I hope this section will be a good documentation for people who want to make cha
 
 ## Making GAPBS disaggregated!
 
-The idea here to separate the allocation and the kernel part of the benchmark.
+TL;DR: The idea here to separate the allocation and the kernel part of the benchmark.
 
 Here is what I did:
 1. A new command line parameter `-x` is added to allow the user to specify whether a given host is a writer (allocator) or a worker (reader) node.
 2. This is defined in `command_line.h` file. See the comments for more details.
 3. TODO: The allocator *only* allocates the graph. In the current implementation, the allocator also executes a kernel (low priority, but I'll separate them).
-4. Suppose the allocator host (referred to as the writer) wants to allocate and run bfs, it'll generate the edge list and create the neighs and index arrays.
+4. Suppose the allocator host (referred to as the writer) wants to allocate and run `bfs`, it'll generate the edge list and create the neighs and index arrays.
 5. Instead of simply starting the kernel, the Graph class is extended to write the graph into a shared memory space.
 6. For single host testing, we use Linux shmem.
 7. An allocator specific file is added to the source in `src/dmalloc.h`.
@@ -76,12 +84,12 @@ Here is what I did:
 9. The Graph class constructor will store the pointer to the shared memory region as a private class variable.
 10. The builder class is modified such that only the writer is allowed to generate the edge list, populate the neighs and index arrays and squish the CSR graph.
 11. The worker nodes (or hosts or processes) initialized the Graph class object `g` as an empty object.
-12. In both cases, the Graph contructor is called with host information.
-13. The pointer to the mmapped region initialized when the Graph class contructor with the final neighs and index is created (at the end of the builder class).
+12. In both cases, the Graph constructor is called with host information.
+13. The pointer to the mmapped region initialized when the Graph class constructor with the final neighs and index is created (at the end of the builder class).
 14. If the writer calls the constructor, it writes some metadata, the neigh array, length of each row of the index array and finally a 2-D index array. See Figure 1 for a better visualization.
-15. The synch. variable is unset when the allocator is writing the graph. It is set only when everything is written into the shared memory region.
+15. The `synch. variable` is unset when the allocator is writing the graph. It is set only when everything is written into the shared memory region.
 16. The worker nodes will wait until the graph is fully written into the shared memory region (pooling into the (int) of the start of the mmap pointer). A potential optimization is to use something like `m_wait`.
-17. The allocator needs to have the `neigh_size` as the length of C pointers are not defined. Same thing for the index array. This is passed as an argument to the class contructor.
+17. The allocator needs to have the `neigh_size` as the length of C pointers are not defined. Same thing for the index array. This is passed as an argument to the class constructor.
 18. If the aforementioned values are undefined or -1 and the host ID > 0 (aka worker node), the sizes are read out of the shared memory.
 19. The writer figures out the size of each row of the index array and then writes them into the shared memory (column size for each index row array).
 20. The reader reads out the same values before assigning pointers to the index array.
@@ -101,20 +109,32 @@ ________________________________________________________________________________
 
 ## Example
 
-To quickly test the benchamark, use `shmalloc` for shared memory.
+To quickly test the benchmark, use `shmalloc` for shared memory.
 This is defined in `src/graph.h`.
-A bfs process can then be created as the writer:
+
+A kernel can also allocate the graph, **HOWEVER**, it is recommended to use the `allocator` to allocate the graph.
+Here are the new options added in this version of GAPBS.
+```sh 
+ -S <int>    : specify the size in GiB of the shared memory     # Eg. 1, 2, 3 .. (2^31 - 1)                   
+ -T <int>    : enable test mode /dev/shmem is mounted [0]/1     # Only use this when testing the framework on a single host system. Defaults to [0]           
+ -l <int>    : if you want to zero out the memory [0]/1         # The allocator can explicitly zero out the bits of the shared memory region before allocating.
+ -x <int>    : specify the host id. 0 -> master                 # Host ID >= 0 (master/allocator), 1 .. n (other hosts)
+ ```
+
+To allocate a graph:
 ```sh
-./bfs -x 0 -g 20
-# Waits for a user input before ending the process.
-# The shmem region is not unset
+./allocator -S 16 -l 1 -x 0 -g 20
+# The shmem region is unset initially and then not unset at the end
 ```
+
 Any other process can be created for the other graph kernels, what will read the same graph from the shared memory region.
 ```sh
-./cc -x 1 -g 20 &
-./bc -x 2 -g 20 &
-./pr -x 3 -g 20 &
-./tc -x 4 -g 20 &
+./bfs -S 16 -x 1 -g 20 &
+./cc -S 16 -x 2 -g 20 &
+./cc_sv -S 16 -x 3 -g 20 &
+./bc -S 16 -x 4 -g 20 &
+./pr -S 16 -x 5 -g 20 &
+./tc -S 16 -x 6 -g 20 &
 ```
 ## Using with gem5 and SST
 

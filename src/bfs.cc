@@ -261,7 +261,5 @@ int main(int argc, char* argv[]) {
     return BFSVerifier(g, vsp.PickNext(), parent);
   };
   BenchmarkKernel(cli, g, BFSBound, PrintBFSStats, VerifierBound);
-  int dummy;
-  std::cin >> dummy;
   return 0;
 }
