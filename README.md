@@ -1,6 +1,8 @@
 GAP Benchmark Suite [![Build Status](https://github.com/sbeamer/gapbs/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/sbeamer/gapbs/actions/workflows/c-cpp.yml)
 ===================
 
+For the disaggregated shared memory implementation, see README-SDM.md
+
 This is the reference implementation for the [GAP](http://gap.cs.berkeley.edu/) [Benchmark Suite](http://gap.cs.berkeley.edu/benchmark.html). It is designed to be a portable high-performance baseline that only requires a compiler with support for C++11. It uses OpenMP for parallelism, but it can be compiled without OpenMP to run serially. The details of the benchmark can be found in the [specification](http://arxiv.org/abs/1508.03619).
 
 The GAP Benchmark Suite is intended to help graph processing research by standardizing evaluations. Fewer differences between graph processing evaluations will make it easier to compare different research efforts and quantify improvements. The benchmark not only specifies graph kernels, input graphs, and evaluation methodologies, but it also provides an optimized baseline implementation (this repo). These baseline implementations are representative of state-of-the-art performance, and thus new contributions should outperform them to demonstrate an improvement.
