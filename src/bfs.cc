@@ -246,7 +246,9 @@ int main(int argc, char* argv[]) {
   if (!cli.ParseArgs())
     return -1;
   Builder b(cli);
-  Graph g = b.MakeGraph();
+  // kg: invoking MakeGraph with a valid host_id
+  assert(cli.host_id() >= 0);
+  Graph g = b.MakeGraph(cli.host_id());
   SourcePicker<Graph> sp(g, cli.start_vertex());
   auto BFSBound = [&sp] (const Graph &g) { return DOBFS(g, sp.PickNext()); };
   SourcePicker<Graph> vsp(g, cli.start_vertex());
@@ -254,5 +256,7 @@ int main(int argc, char* argv[]) {
     return BFSVerifier(g, vsp.PickNext(), parent);
   };
   BenchmarkKernel(cli, g, BFSBound, PrintBFSStats, VerifierBound);
+  int dummy;
+  std::cin >> dummy;
   return 0;
 }

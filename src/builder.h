@@ -4,6 +4,9 @@
 #ifndef BUILDER_H_
 #define BUILDER_H_
 
+// kg: For MAX_SIZE
+#include <stddef.h>
+
 #include <algorithm>
 #include <cinttypes>
 #include <fstream>
@@ -46,8 +49,27 @@ class BuilderBase {
   bool in_place_ = false;
   int64_t num_nodes_ = -1;
 
+  // kg: in this updated version of the shared gapbs, we maintain the allocator
+  // object in builder class rather than in the graph class.
+  // _______________________________________________________________ .. ______
+  // | synch_var (0) | **index | *neighs                                      |
+  // |_______________|_________|____________________________________ .. ______|
+  int *_mmap_pointer;
+  // kg: a synchronization variable is needed to make sure that the allocation
+  // is finished.
+  int *_synch_var;    // size = 1 x sizeof(int)
+
  public:
+  // kg: Need a couple of more variables to maintain the size of the index and
+  // neighs. The x dimension is _x and y is _y for all these extra variables.
+  size_t index_x, index_y, neighs_x;
+
   explicit BuilderBase(const CLBase &cli) : cli_(cli) {
+    // kg: Set the size variables to -1 so that we can distinguish them later.
+    index_x = SIZE_MAX;
+    index_y = SIZE_MAX;
+    neighs_x = SIZE_MAX;
+
     symmetrize_ = cli_.symmetrize();
     needs_weights_ = !std::is_same<NodeID_, DestID_>::value;
     in_place_ = cli_.in_place();
@@ -57,6 +79,7 @@ class BuilderBase {
       exit(-30);
     }
   }
+
 
   DestID_ GetSource(EdgePair<NodeID_, NodeID_> e) {
     return e.u;
@@ -138,9 +161,15 @@ class BuilderBase {
 
   // Removes self-loops and redundant edges
   // Side effect: neighbor IDs will be sorted
+
   void SquishCSR(const CSRGraph<NodeID_, DestID_, invert> &g, bool transpose,
                  DestID_*** sq_index, DestID_** sq_neighs) {
+  }
+  void SquishCSR(const CSRGraph<NodeID_, DestID_, invert> &g, bool transpose,
+                 DestID_*** sq_index, DestID_** sq_neighs, size_t *index_x,
+                 size_t *index_y, size_t* index_neighs) {
     pvector<NodeID_> diffs(g.num_nodes());
+    // neighs_x = 
     DestID_ *n_start, *n_end;
     #pragma omp parallel for private(n_start, n_end)
     for (NodeID_ n=0; n < g.num_nodes(); n++) {
@@ -157,7 +186,21 @@ class BuilderBase {
       diffs[n] = new_end - n_start;
     }
     pvector<SGOffset> sq_offsets = ParallelPrefixSum(diffs);
+    // kg: sq_offsets go upto the number of degrees.
+    this->neighs_x = sq_offsets[g.num_nodes()];
+
     *sq_neighs = new DestID_[sq_offsets[g.num_nodes()]];
+
+    // kg: assert that the class index_x is set already.
+    assert(this->index_x != SIZE_MAX);
+
+    // TODO: We'll remove these later.
+    // *index_x = sq_offsets.size();
+
+    // // index_y = new size_t;
+    // *index_y = sq_offsets.size();
+    // *index_y = 65536;
+
     *sq_index = CSRGraph<NodeID_, DestID_>::GenIndex(sq_offsets, *sq_neighs);
     #pragma omp parallel for private(n_start)
     for (NodeID_ n=0; n < g.num_nodes(); n++) {
@@ -167,10 +210,101 @@ class BuilderBase {
         n_start = g.out_neigh(n).begin();
       std::copy(n_start, n_start+diffs[n], (*sq_index)[n]);
     }
+    std::cout << "info: prev_size = " << g.num_nodes() << std::endl;
   }
 
+  // // kg: we need a new method to SquishGraph with host ids enabled.
+  CSRGraph<NodeID_, DestID_, invert> SquishGraph(
+      const CSRGraph<NodeID_, DestID_, invert> &g, int host_id) {
+    
+    // kg: what do we want?
+    // the master node should be able to allocate the graph.
+    // the worker nodes will only work on the graph.
+
+    // kg: These structures should be filled up regardless of being the alloca-
+    // tor or the worker nodes.
+    DestID_ **out_index, *out_neighs, **in_index, *in_neighs;
+    // kg: We need to keep a track of the size of the out_index and also the
+    // out_neighs
+    size_t index_x, index_y, index_out_neighs;
+    if (host_id == 0) {
+      // kg: squishing will only be done by the allocator. The workers should
+      // not bother with this.
+      SquishCSR(g, false, &out_index, &out_neighs, &index_x, &index_y,
+                                                          &index_out_neighs);
+      if (g.directed()) {
+        if (invert) {
+          // kg: not taking any chances rn as I am disabling everything that
+          // I'm not verifying.
+          std::cout << "fatal: NotImplementedError! Cannot invert graph!" <<
+                  std::endl;
+          exit(-1);
+
+          // kg: unreachable code.
+          SquishCSR(g, true, &in_index, &in_neighs);
+        }
+        // kg: This should also be an unreachable code. I'll disable it for now
+        std::cout << "fatal: NotImplementedError! Cannot use directed graph!"
+                << std::endl;
+        exit(-1);
+
+        // kg: unreachable code.
+        return CSRGraph<NodeID_, DestID_, invert>(g.num_nodes(), out_index,
+                                                  out_neighs, in_index,
+                                                  in_neighs);
+      } else {
+        // TODO: un-hardcode this
+
+        // kg: This is the only constructor we'll work with for npw. we'll use
+        // the validator to verify whether the graph is correctly loaded and
+        // stored in the mmap space. We disable that feature for now.
+        // bool validate_graph = false;
+        //
+        // The values of the indices are set as class variables.
+
+        return CSRGraph<NodeID_, DestID_, invert>(g.num_nodes(), &out_index,
+                                    this->index_x, this->index_x, &out_neighs,
+                                    this->neighs_x, host_id, false);
+      }
+    }
+    else {
+      // kg: this is a worker node. I'm not exactly sure what to do with it.
+      // for now, i am just fatally killing the worker!
+      std::cout << "warn: NotImplementedError! IDK how to use the workers " <<
+          "without any of the graph's meta information. I am NOT " <<
+          "hardcoding anything RN." << std::endl;
+      // exit(-1);
+      // kg: so, if I am a worker, my graph is already allocated and created by
+      // the master. All I need to do now is to read it out into my own graph.
+        bool validate_graph = false;
+
+        // TODO: need to read these from the shared memory! The sizes are hard-
+        // coded for testing.
+        // index_x = 1025, index_y = 1024, index_out_neighs = 20992;
+        index_x = this->index_x = 1025;
+        index_y = this->index_x;
+        index_out_neighs = this->neighs_x = 20992;
+        std::cout << "worker x: " << this->index_x << " y: " << this->index_y << " neighs: " << this->neighs_x << std::endl;
+        assert(this->index_x != SIZE_MAX);
+        // creatign a new constructor to 
+        // int num_nodes = 1024;
+        return CSRGraph<NodeID_, DestID_, invert>(1024, &out_index,
+                                    index_x, index_y, &out_neighs,
+                              index_out_neighs, host_id, validate_graph); //' //', true);
+    }
+  }
+
+  // kg: this is the original SquishGraph method, which needs to be disabled in
+  // order to get the disaggregated version of the code working.
   CSRGraph<NodeID_, DestID_, invert> SquishGraph(
       const CSRGraph<NodeID_, DestID_, invert> &g) {
+    
+    // kg: make sure to exit the program if invoked with this method.
+    std::cout << "fatal: please create a graph with a host_id." << std::endl;
+    exit(-1);
+
+    // TODO Mark for deletion
+    // kg: unreachable code.
     DestID_ **out_index, *out_neighs, **in_index, *in_neighs;
     SquishCSR(g, false, &out_index, &out_neighs);
     if (g.directed()) {
@@ -298,9 +432,22 @@ class BuilderBase {
   */
   void MakeCSR(const EdgeList &el, bool transpose, DestID_*** index,
                DestID_** neighs) {
+    // kg: This method is called to create the CSR.
+    
+    // What to do? -> read the el from the shared memory and the CSR is always
+    // in the local memory.
+
+    // We store all of these things in the shared memory
     pvector<NodeID_> degrees = CountDegrees(el, transpose);
     pvector<SGOffset> offsets = ParallelPrefixSum(degrees);
+
+    // neighs is a 1D matrix of type DestID_
     *neighs = new DestID_[offsets[num_nodes_]];
+
+    this->index_x = offsets.size();
+    // kg: The dimension of the _y per row is variable. This is calculated in
+    // the Graph class.
+
     *index = CSRGraph<NodeID_, DestID_>::GenIndex(offsets, *neighs);
     #pragma omp parallel for
     for (auto it = el.begin(); it < el.end(); it++) {
@@ -313,53 +460,134 @@ class BuilderBase {
     }
   }
 
-  CSRGraph<NodeID_, DestID_, invert> MakeGraphFromEL(EdgeList &el) {
+
+  CSRGraph<NodeID_, DestID_, invert> MakeGraphFromEL(EdgeList &el,
+                                                                int host_id) {
     DestID_ **index = nullptr, **inv_index = nullptr;
     DestID_ *neighs = nullptr, *inv_neighs = nullptr;
-    Timer t;
-    t.Start();
-    if (num_nodes_ == -1)
-      num_nodes_ = FindMaxNodeID(el)+1;
-    if (needs_weights_)
-      Generator<NodeID_, DestID_, WeightT_>::InsertWeights(el);
-    if (in_place_) {
-      MakeCSRInPlace(el, &index, &neighs, &inv_index, &inv_neighs);
-    } else {
-      MakeCSR(el, false, &index, &neighs);
-      if (!symmetrize_ && invert) {
-        MakeCSR(el, true, &inv_index, &inv_neighs);
+
+    // Ideally only the allocator/write is allowed to access this method.
+    // However the workers also need to access it as it calls CSRGraph
+    // contructor.
+
+    // So the el will be deleted after this method is executed (pretty much).
+
+    // Information is only available if the write node is calling this method.
+    // TODO Maked this for deletion! If this is a worker, then the number
+    // of nodes will never be calculated without the el!
+    /* 
+    if (host_id != 0) {
+      if (num_nodes_ == -1) {
+        num_nodes_ = FindMaxNodeID(el)+1;
+        std::cout << " - " <<  num_nodes_ << std::endl;
+      }
+      if (needs_weights_) {
+        // assert(false && "cannot add weights!");
+        Generator<NodeID_, DestID_, WeightT_>::InsertWeights(el);
       }
     }
-    t.Stop();
-    PrintTime("Build Time", t.Seconds());
-    if (symmetrize_)
+    */
+
+    // Make sure that this is the writer node.
+    if (host_id == 0) {
+      // This is the writer node
+      Timer t;
+      t.Start();
+      if (num_nodes_ == -1)
+        num_nodes_ = FindMaxNodeID(el)+1;
+      if (needs_weights_) {
+        // unreachable code!
+        assert(false && "cannot add weights!");
+        Generator<NodeID_, DestID_, WeightT_>::InsertWeights(el);
+      }
+      if (in_place_) {
+        assert(false && "cannot create in place graph!");
+        MakeCSRInPlace(el, &index, &neighs, &inv_index, &inv_neighs);
+      } else {
+        // kg: This is the CSR that is called! figure out the sizes of index
+        // and the neighs here.
+
+        // The program is killed in any other method!
+        MakeCSR(el, false, &index, &neighs);
+
+        if (!symmetrize_ && invert) {
+          assert(false && "cannot make inverted CSR!");
+          MakeCSR(el, true, &inv_index, &inv_neighs);
+        }
+      }
+      t.Stop();
+      PrintTime("Build Time", t.Seconds());
+    }
+    if (symmetrize_) {
+      // kg: This is the flow for synthetic graphs. If this is a worker node,
+      // then the index and the neighs are just initialized as nullptr for the
+      // class variables.
       return CSRGraph<NodeID_, DestID_, invert>(num_nodes_, index, neighs);
-    else
+    }
+    else {
+      // kg: This is what is _NOT_ called for synthetic graphs.
+      assert(false && "This section of the code must be unreachable!\n");
       return CSRGraph<NodeID_, DestID_, invert>(num_nodes_, index, neighs,
                                                 inv_index, inv_neighs);
+    }
   }
 
   CSRGraph<NodeID_, DestID_, invert> MakeGraph() {
+    // kg: This is the vanilla version of the method. must be fatally killed if
+    // called!
+    std::cout << "fatal: cannot call MakeGraph without a host_id!" <<
+          std::endl;
+    exit(-1);
+  }
+
+  CSRGraph<NodeID_, DestID_, invert> MakeGraph(int host_id) {
     CSRGraph<NodeID_, DestID_, invert> g;
     {  // extra scope to trigger earlier deletion of el (save memory)
       EdgeList el;
-      if (cli_.filename() != "") {
-        Reader<NodeID_, DestID_, WeightT_, invert> r(cli_.filename());
-        if ((r.GetSuffix() == ".sg") || (r.GetSuffix() == ".wsg")) {
-          return r.ReadSerializedGraph();
-        } else {
-          el = r.ReadFile(needs_weights_);
+      // kg: kg said that only the writer is allowed. Needs to be verified once
+      // TODO
+      if (host_id == 0) {
+        std::cout << "info: I am a writer/allocator node!" << std::endl;
+        if (cli_.filename() != "") {
+          Reader<NodeID_, DestID_, WeightT_, invert> r(cli_.filename());
+          if ((r.GetSuffix() == ".sg") || (r.GetSuffix() == ".wsg")) {
+            return r.ReadSerializedGraph();
+          } else {
+            el = r.ReadFile(needs_weights_);
+          }
+        } else if (cli_.scale() != -1) {
+          // kg: updated the constructor call to use the new Generator with
+          // node id as another parameter.
+          Generator<NodeID_, DestID_> gen(cli_.scale(), cli_.degree(),
+                                                              cli_.host_id());
+          el = gen.GenerateEL(cli_.uniform());
         }
-      } else if (cli_.scale() != -1) {
-        Generator<NodeID_, DestID_> gen(cli_.scale(), cli_.degree());
-        el = gen.GenerateEL(cli_.uniform());
+        g = MakeGraphFromEL(el, cli_.host_id());
       }
-      g = MakeGraphFromEL(el);
-    }
-    if (in_place_)
+      else {
+        // kg: This is a worker node.
+        std::cout << "info: I am a worker node!" << std::endl;
+
+        // call MakeGraphFromEL as a worker node so that the graph class
+        // variables are set (to nullptr ofc).
+        g = MakeGraphFromEL(el, cli_.host_id());
+
+        // TODO Marked for deletion!
+        // return SquishGraph(g, host_id);
+
+      }
+    } // close the extra scope!
+
+    if (in_place_) {
+      // kg: again, this feature is disabled.
+      assert(false && "fatal: NotImplementedError: cannot use in_place_!\n");
+      // kg: unreachable code.
       return g;
+    }
     else
-      return SquishGraph(g);
+      // kg: So this is the only function called. For both allocator and
+      // worker, this will be called.
+      return SquishGraph(g, cli_.host_id());
   }
 
   // Relabels (and rebuilds) graph by order of decreasing degree
@@ -389,10 +617,12 @@ class BuilderBase {
     pvector<SGOffset> offsets = ParallelPrefixSum(degrees);
     DestID_* neighs = new DestID_[offsets[g.num_nodes()]];
     DestID_** index = CSRGraph<NodeID_, DestID_>::GenIndex(offsets, neighs);
-    #pragma omp parallel for
+    // #pragma omp parallel for
     for (NodeID_ u=0; u < g.num_nodes(); u++) {
-      for (NodeID_ v : g.out_neigh(u))
+      for (NodeID_ v : g.out_neigh(u)) {
+        // kg: wants to debug this
         neighs[offsets[new_ids[u]]++] = new_ids[v];
+      }
       std::sort(index[new_ids[u]], index[new_ids[u]+1]);
     }
     t.Stop();

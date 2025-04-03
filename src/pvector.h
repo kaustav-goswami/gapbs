@@ -4,6 +4,7 @@
 #ifndef PVECTOR_H_
 #define PVECTOR_H_
 
+#include <stdlib.h>
 #include <algorithm>
 
 
@@ -27,6 +28,7 @@ class pvector {
   pvector() : start_(nullptr), end_size_(nullptr), end_capacity_(nullptr) {}
 
   explicit pvector(size_t num_elements) {
+    // exit(-1);
     start_ = new T_[num_elements];
     end_size_ = start_ + num_elements;
     end_capacity_ = end_size_;
@@ -81,6 +83,9 @@ class pvector {
 
   // not thread-safe
   void reserve(size_t num_elements) {
+    // kg: make the program exit. we don't want any explicit new or
+    // mallocs
+    exit(-1);
     if (num_elements > capacity()) {
       T_ *new_range = new T_[num_elements];
       #pragma omp parallel for

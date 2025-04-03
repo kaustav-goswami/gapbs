@@ -128,7 +128,9 @@ int main(int argc, char* argv[]) {
   if (!cli.ParseArgs())
     return -1;
   Builder b(cli);
-  Graph g = b.MakeGraph();
+  // kg: invoking makegraph with a valid host_id
+  assert(cli.host_id() >= 0);
+  Graph g = b.MakeGraph(cli.host_id());
   if (g.directed()) {
     cout << "Input graph is directed but tc requires undirected" << endl;
     return -2;

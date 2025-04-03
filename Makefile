@@ -1,6 +1,6 @@
 # See LICENSE.txt for license details.
 
-CXX_FLAGS += -std=c++11 -O3 -Wall -DM5OP_ADDR=0xFFFF0000
+CXX_FLAGS += -std=c++11 -O0 -Wall -DM5OP_ADDR=0xFFFF0000 -g
 PAR_FLAG = -fopenmp
 CC = gcc
 
