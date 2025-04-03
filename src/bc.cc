@@ -233,8 +233,13 @@ int main(int argc, char* argv[]) {
   if (cli.num_iters() > 1 && cli.start_vertex() != -1)
     cout << "Warning: iterating from same source (-r & -i)" << endl;
   Builder b(cli);
-  // kg: invoking makegraph with a valid host_id
-  assert(cli.host_id() >= 0);
+  // kg: invoking MakeGraph with a valid host_id
+  assert(cli.host_id() >= 0 &&
+                "The host ID (-x <int>) is not specified...");
+  // make sure that the size of the shared memory is specified.
+  assert(cli.get_size() > 0 &&
+                "The shared memory size (-S <GiB>) is not specified...");
+
   Graph g = b.MakeGraph(cli.host_id());
   SourcePicker<Graph> sp(g, cli.start_vertex());
   auto BCBound =

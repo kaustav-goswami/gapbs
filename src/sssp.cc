@@ -196,8 +196,13 @@ int main(int argc, char* argv[]) {
   if (!cli.ParseArgs())
     return -1;
   WeightedBuilder b(cli);
-  // kg: invoking makegraph with a valid host_id
-  assert(cli.host_id() >= 0);
+  // kg: invoking MakeGraph with a valid host_id
+  assert(cli.host_id() >= 0 &&
+                "The host ID (-x <int>) is not specified...");
+  // make sure that the size of the shared memory is specified.
+  assert(cli.get_size() > 0 &&
+                "The shared memory size (-S <GiB>) is not specified...");
+
   WGraph g = b.MakeGraph(cli.host_id());
   SourcePicker<WGraph> sp(g, cli.start_vertex());
   auto SSSPBound = [&sp, &cli] (const WGraph &g) {

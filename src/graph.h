@@ -159,9 +159,14 @@ class CSRGraph {
     out_index_(index), out_neighbors_(neighs),
     in_index_(index), in_neighbors_(neighs) {
       // kg: relabel function. some kernels call this.
-      std::cout << "info: relabel function called!" << std::endl;
+
+      // not terribly important to notify the user.
+      // std::cout << "info: relabel function called!" << std::endl;
+
       // we cannot calculate num_edges_ right now as these structures are all
       // nullptr for the workers.
+
+      // TODO: does this change in TC?
       // num_edges_ = (out_index_[num_nodes_] - out_index_[0]) / 2;
     }
 
@@ -169,8 +174,9 @@ class CSRGraph {
   // further, a method is required to validate whether the graph generated and
   // read from the /dev is the same.
   // TODO
-  CSRGraph(int64_t num_nodes, DestID_*** index, size_t index_x, size_t index_y,
-        DestID_** neighs, size_t neigh_size, int host_id, int validate_graph) :
+  CSRGraph(int64_t num_nodes, DestID_*** index, size_t index_x,
+        DestID_** neighs, size_t neigh_size, int host_id, int validate_graph,
+        int size_of_shmem, int test_mode) :
     directed_(false), num_nodes_(num_nodes) {
       // kg: Make sure that the shared graph will be stored here and nothing
       // else.
@@ -180,10 +186,12 @@ class CSRGraph {
       // otherwise, return the pointers to the right part of the memory back to
       // the user as these might be clients. the pointer must be int*
       // _mmap_pointer = hmalloc(1 << 30, host_id);
-
-      _mmap_pointer = shmalloc(1 << 30, host_id);
-
-      assert(index_x == index_y);
+      if (test_mode == 1) {
+        std::cout << "info: test mode! Will use shmem" << std::endl;
+        _mmap_pointer = shmalloc((size_t) size_of_shmem, host_id);
+      }
+      else
+        _mmap_pointer = dmalloc(size_of_shmem, host_id);
 
       // kg: if i am a worker node, then I need to wait for the synch variable
 
@@ -255,12 +263,8 @@ class CSRGraph {
       std::cout << "info: value at synch. location = " << _mmap_pointer[0]
                                                                   << std::endl;
 
-      // kg: sanity check. make sure that the graph stored in the mmap space
-      // is indeed the graph as generated.
-      std::cout << "out index of the host " << host_id << " : " << *out_index_[num_nodes_] << std::endl;
-      std::cout << " " << *out_index_[0] << std::endl;
-      std::cout << " " << **index[0] << std::endl;
-      std::cout << " " << num_nodes_ << std::endl;
+      // validation is done already by dumping the data into separate files.
+      // I'm putting this on a low priority to do item.
       if (validate_graph == true) {
         // TODO
         std::cout << "fatal: NotImplementedError: Validation is pending!" <<

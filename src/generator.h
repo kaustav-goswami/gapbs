@@ -52,18 +52,10 @@ class Generator {
   Generator(int scale, int degree, int host_id) {
     // kg: add a new variable to hold the host_id_
     host_id_ = host_id;
-    // kg: make sure that the node ID is valid. Can't do much, but the value
-    // must always be >= 0.
-    if (host_id_ < 0) {
-        std::cout << "fatal: invalid node ID. Must be a positive number!" <<
-                                                                    std::endl;
-        exit(-1);
-    }
-    else if (host_id_ == 0)
+    if (host_id_ == 0)
         // inform the user the host/node id and the role
-        std::cout << "info: This host is the master node!" << std::endl; 
-    else
-        std::cout << "info: This host is a worker node." << std::endl;
+        std::cout << "info: writer/allocator node created Generator object!"
+                                                                  << std::endl; 
 
     scale_ = scale;
     num_nodes_ = 1l << scale;

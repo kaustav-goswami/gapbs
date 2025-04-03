@@ -4,11 +4,17 @@
 // This file is taken from simple-graph to allocate memory for the graph
 // software. It understands master and worker to make sure that the clients are
 // not allowed to modify the graph in the remote host.
+//
+// For simple-graph,
+// see https://github.com/kaustav-goswami/disaggregated-shared-graphs
 
 // The master node should ONLY be responsible for allocating the graph.
 
 // For testing on a local host, the code can switch to use a hugepage. Huge
 // pages must be enabled to do so.
+
+// For local testing without sude, shmem was added too. By default, the shmem
+// file is opened in the gapbs version.
 
 // We need a overlord function that manages all the different objects for
 // allocations. pvector is called multiple times, which makes managing a flat
@@ -31,11 +37,7 @@
 
 #include "pvector.h"
 
-// int *overload_allocator(T_ *pvector, size_t size, int host_id) {
-//     assert(false && "NotImplementedError");
-//     // This function should make sure that memories do not overlap.
-
-// }
+#define ONE_G 0x40000000
 
 int* dmalloc(size_t size, int host_id) {
     // hehe, I love the name
@@ -46,7 +48,7 @@ int* dmalloc(size_t size, int host_id) {
     // other hosts should only have READ permission.
     //
     // @params
-    // :size: Size of requested memory in bytes
+    // :size: Size of requested memory in GiB
     // :host_id: An ID sent to dictate whether this is a master or a worker
     //
     // @returns
@@ -75,8 +77,21 @@ int* dmalloc(size_t size, int host_id) {
     
     // Try allocating the required size for the graph. This might be
     // complicated if the graph is very large!
-    int *ptr = (int *) mmap (
-                    nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    // With all the testings, it seems that the mmap call is not a problem.
+    // Please submit a bug report/issue if you see an error.
+
+    // Make sure only the allocator has READ/WRITE permission. This forces
+    // software coherence!
+    int *ptr;
+    if (host_id == 0) {
+        ptr = (int *) mmap (nullptr, size * ONE_G,
+                                    PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    }
+    else {
+        ptr = (int *) mmap (nullptr, size * ONE_G,
+                                            PROT_READ, MAP_SHARED, fd, 0);
+
+    }
 
     // The map may fail due to several reasons but we notify the user.
     if (ptr == MAP_FAILED) {
@@ -96,14 +111,15 @@ int* hmalloc(size_t size, int host_id) {
     // other hosts should only have READ permission.
     //
     // @params
-    // :size: Size of requested memory in bytes
+    // :size: Size of requested memory in GIB
     // :host_id: An ID sent to dictate whether this is a master or a worker
     //
     // @returns
     // A pointer to the mmap call
     //
     FILE *fp;
-    // int fp;
+    
+    // XXX: WARNING, COHERENCE IS NOT ENFORCED!
     if (host_id == 0)
         // fp = fopen("/mnt/huge", "w+");
         fp = fopen("/dev/zero", "w+");
@@ -134,11 +150,11 @@ int* hmalloc(size_t size, int host_id) {
     // try without the huge page but keep the backed file same
     int *ptr;
     if (host_id == 0)
-        ptr = (int *) mmap(
-            0x0, 1 << 30 , PROT_READ | PROT_WRITE, MAP_SHARED, fileno(fp), 0);
+        ptr = (int *) mmap(0x0, size * ONE_G,
+                            PROT_READ | PROT_WRITE, MAP_SHARED, fileno(fp), 0);
     else
-        ptr = (int *) mmap(
-            0x0, 1 << 30 , PROT_READ , MAP_SHARED, fileno(fp), 0);
+        ptr = (int *) mmap(0x0, size * ONE_G, 
+                                        PROT_READ , MAP_SHARED, fileno(fp), 0);
 
     // The map may fail due to several reasons but we notify the user.
     if (ptr == MAP_FAILED) {
@@ -152,36 +168,78 @@ int* hmalloc(size_t size, int host_id) {
 }
 
 int* shmalloc(size_t size, int host_id) {
-
+    // To be used with LINUX SHMEM on a single host for testing only
+    //
+    // This function will create a MAP_SHARED memory map for the graph. The
+    // idea is to allocate the graph (potentially a large graph) in the
+    // remote/disaggregated memory and only the master will have RDWR flag. All
+    // other hosts should only have READ permission.
+    //
+    // @params
+    // :size: Size of requested memory in GIB
+    // :host_id: An ID sent to dictate whether this is a master or a worker
+    //
+    // @returns
+    // A pointer to the mmap call
+    //
+    // XXX: WARNING, COHERENCE IS NOT ENFORCED when opening the file!
     int fd = shm_open("/my_shmem2", O_CREAT | O_RDWR | O_LARGEFILE, 0666);
     if (fd == -1) {
         perror("shm_open");
         exit(EXIT_FAILURE);
     }
 
-    if (ftruncate(fd, size) == -1) {
+    if (ftruncate(fd, size * ONE_G) == -1) {
         perror("ftruncate");
         exit(EXIT_FAILURE);
     }
 
-    int *ptr = nullptr;
-    
+    int *ptr;
+    // PROT_READ/WRITE is enforced here.
     // depending upon the host id, we'll set the read/write permissons.
-    if (host_id == 0)
-        ptr = (int *) mmap(
-                NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    else
+    if (host_id == 0) {
+        ptr = (int *) mmap(NULL, size * ONE_G,
+                                    PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    }
+    else {
         // This is a client host.
-        ptr = (int *) mmap(
-                NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        ptr = (int *) mmap(NULL, size * ONE_G, PROT_READ, MAP_SHARED, fd, 0);
+    }
+    // The map may fail due to several reasons but we notify the user.
+    if (ptr == MAP_FAILED) {
+        printf("The mmap call failed! Maybe it's too huge?\n");
+        exit(EXIT_FAILURE);
+    }
     return ptr;
 }
 
-void munmap_memory() {
-    // This is a hardcoded function which zeroes out the memory explictly
-    int *start = shmalloc(0x40000000 , 0); 
+void munmap_memory(size_t size, int test_mode, int host_id) {
+    // This is a utility function to zero out the memory allocated to the graph
+    // explicitly. This has to be called by any host. Security checks aren't
+    // present if the host wants to change it's ID
+    //
+    // @params
+    // size_t size: size of the shared memory in GiB
+    // int test_mode: indicate if you're using /dev/dax or /dev/shmem
+    //
+    // @returns
+    // none
+    
+    int *start;
+    if (host_id == 0) {
+        if (test_mode)
+            start = shmalloc(size, host_id);
+        else
+            start = dmalloc(size, host_id);
+    }
+    else {
+        std::cout << "warn: cannot munmap! Needs to be the allocator"
+                                                                << std::endl;
+    }
+    // absolutely bad programming right here!
     char *arr = (char *) &start[0];
-    for (size_t i = 0 ; i < 0x40000000 ; i++)
+    #pragma omp parallel for
+    for (size_t i = 0 ; i < size * ONE_G; i++)
         arr[i] = 0; 
 }
 

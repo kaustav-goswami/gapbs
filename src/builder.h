@@ -259,41 +259,13 @@ class BuilderBase {
         // The values of the indices are set as class variables.
 
         return CSRGraph<NodeID_, DestID_, invert>(g.num_nodes(), &out_index,
-                                    this->index_x, this->index_x, &out_neighs,
-                                    this->neighs_x, host_id, false);
+                                    this->index_x, &out_neighs,
+              this->neighs_x, host_id, false, cli_.get_size(), cli_.is_test());
       }
     }
     return CSRGraph<NodeID_, DestID_, invert>(g.num_nodes(), &out_index,
-                                    this->index_x, this->index_x, &out_neighs,
-                                    this->neighs_x, host_id, false);
-    /* else {
-      // kg: this is a worker node. I'm not exactly sure what to do with it.
-      // for now, i am just fatally killing the worker!
-      std::cout << "warn: NotImplementedError! IDK how to use the workers " <<
-          "without any of the graph's meta information. I am NOT " <<
-          "hardcoding anything RN." << std::endl;
-      // exit(-1);
-      // kg: so, if I am a worker, my graph is already allocated and created by
-      // the master. All I need to do now is to read it out into my own graph.
-        bool validate_graph = false;
-
-        // TODO: need to read these from the shared memory! The sizes are hard-
-        // coded for testing.
-        // index_x = 1025, index_y = 1024, index_out_neighs = 20992;
-        index_x = this->index_x = 1025;
-        index_y = this->index_x;
-        index_out_neighs = this->neighs_x = 20992;
-        std::cout << "worker x: " << this->index_x << " y: " << this->index_y << " neighs: " << this->neighs_x << std::endl;
-        assert(this->index_x != SIZE_MAX);
-        // creatign a new constructor to 
-        // int num_nodes = 1024;
-
-        // kg: The worker does not know the number of nodes in the graph, sizes
-        // of each of the arrays and the data.
-        return CSRGraph<NodeID_, DestID_, invert>(g.num_nodes(), &out_index,
-                                    index_x, index_y, &out_neighs,
-                              index_out_neighs, host_id, validate_graph); //' //', true);
-    } */
+                                    this->index_x, &out_neighs,
+              this->neighs_x, host_id, false, cli_.get_size(), cli_.is_test());
   }
 
   /*

@@ -16,15 +16,21 @@ int main(int argc, char* argv[]) {
     return -1;
   Builder b(cli);
   // kg: invoking MakeGraph with a valid host_id
-  assert(cli.host_id() >= 0);
-  Graph g = b.MakeGraph(cli.host_id());
+  assert(cli.host_id() >= 0 &&
+                "The host ID (-x <int>) is not specified...");
+  // make sure that the size of the shared memory is specified.
+  assert(cli.get_size() > 0 &&
+                "The shared memory size (-S <GiB>) is not specified...");
 
-  // pretty much done here!
   // we don't overwrite the graph or munmap it unless the user specifies.
   if (cli.munmap_me() == 1) {
       std::cout << "info: zeroing out the memory" << std::endl;
-      munmap_memory();
+      munmap_memory(cli.get_size(), cli.is_test(), cli.host_id());
   }
+  
+  Graph g = b.MakeGraph(cli.host_id());
+
+  // pretty much done here!
 
   return 0;
 }
