@@ -1,4 +1,12 @@
-# GAPBS Benchamark for Shared Disaggregated Memory
+---
+title: GAPBS Benchamark for Shared Disaggregated Memory for X86 ISA
+shortdoc: >
+    A modified GAPBS benchmark to separate graph allocation and graph kernels
+    This work is based on the original GAPBS reference implementation by S. Beamer et al.
+authors: ["kg"]
+---
+
+The original README of GAPBS can be found in `README.md`.
 
 This work is based on GAPBS by S. Beamer et al. [1].
 The version of GAPBS used is forked from https://github.com/darchr/gapbs
@@ -136,8 +144,9 @@ Any other process can be created for the other graph kernels, what will read the
 ./pr -S 16 -x 5 -g 20 &
 ./tc -S 16 -x 6 -g 20 &
 ```
-## Using with gem5 and SST
+## Using this framework in simulations
 
-### Using with composable gem5 SST setup
+TODO.
 
-### Using with gem5-only setup
+## References
+[1] S. Beamer, K. Asanovi´ c, and D. Patterson, “The GAP Benchmark Suite,” arXiv preprint arXiv:1508.03619, 2015.
