@@ -103,10 +103,14 @@ int* hmalloc(size_t size, int host_id) {
     // A pointer to the mmap call
     //
     FILE *fp;
+    // int fp;
     if (host_id == 0)
-        fp = fopen("/mnt/huge", "w+");
+        // fp = fopen("/mnt/huge", "w+");
+        fp = fopen("/dev/zero", "w+");
+        // fp = shm_open("/myregion", O_RDWR | O_CREAT, 0666);
     else
-        fp = fopen("/mnt/huge", "r");
+        // fp = shm_open("/myregion", O_RDONLY, 0666);
+        fp = fopen("/dev/zero", "w+");
 
     // It is assumed that we are working with DAX devices. Will change change
     // to something else if needed later.
@@ -121,10 +125,20 @@ int* hmalloc(size_t size, int host_id) {
     
     // Try allocating the required size for the graph. This might be
     // complicated if the graph is very large!
+    /*
     int* ptr = (int *) mmap(
         0x0, 1 << 30 , PROT_READ | PROT_WRITE,
         MAP_SHARED | MAP_ANONYMOUS|  MAP_HUGETLB | (30UL << MAP_HUGE_SHIFT),
         fileno(fp), 0);
+    */
+    // try without the huge page but keep the backed file same
+    int *ptr;
+    if (host_id == 0)
+        ptr = (int *) mmap(
+            0x0, 1 << 30 , PROT_READ | PROT_WRITE, MAP_SHARED, fileno(fp), 0);
+    else
+        ptr = (int *) mmap(
+            0x0, 1 << 30 , PROT_READ , MAP_SHARED, fileno(fp), 0);
 
     // The map may fail due to several reasons but we notify the user.
     if (ptr == MAP_FAILED) {
@@ -135,6 +149,32 @@ int* hmalloc(size_t size, int host_id) {
     // The mmap was successful! return the pointer to the user.
     return ptr;
 
+}
+
+int* shmalloc(size_t size, int host_id) {
+
+    int fd = shm_open("/my_shmem2", O_CREAT | O_RDWR | O_LARGEFILE, 0666);
+    if (fd == -1) {
+        perror("shm_open");
+        exit(EXIT_FAILURE);
+    }
+
+    if (ftruncate(fd, size) == -1) {
+        perror("ftruncate");
+        exit(EXIT_FAILURE);
+    }
+
+    int *ptr = nullptr;
+    
+    // depending upon the host id, we'll set the read/write permissons.
+    if (host_id == 0)
+        ptr = (int *) mmap(
+                NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    else
+        // This is a client host.
+        ptr = (int *) mmap(
+                NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    return ptr;
 }
 
 #endif // DMALLOC_H

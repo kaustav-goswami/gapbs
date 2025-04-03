@@ -155,7 +155,9 @@ int main(int argc, char* argv[]) {
   if (!cli.ParseArgs())
     return -1;
   Builder b(cli);
-  Graph g = b.MakeGraph();
+  // Make sure to call MakeGraph with a valid host_id
+  assert(cli.host_id() >= 0);
+  Graph g = b.MakeGraph(cli.host_id());
   BenchmarkKernel(cli, g, ShiloachVishkin, PrintCompStats, CCVerifier);
   #ifdef HOOKS
       std::cout<<"---------------------roi end--------------------" << '\n';

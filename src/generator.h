@@ -90,6 +90,11 @@ class Generator {
   }
 
   EdgeList MakeUniformEL() {
+    // kg: This is not a default feature, so kill the graph if they try to do
+    // this.
+    std::cout << "fatal: Uniform EL is created!" << std::endl;
+    exit(-1);
+
     EdgeList el(num_edges_);
     #pragma omp parallel
     {
@@ -107,6 +112,7 @@ class Generator {
   }
 
   EdgeList MakeRMatEL() {
+    std::cout << "info: Non-uniform EL is created!" << std::endl;
     const float A = 0.57f, B = 0.19f, C = 0.19f;
     EdgeList el(num_edges_);
     #pragma omp parallel

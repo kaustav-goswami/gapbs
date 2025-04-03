@@ -39,7 +39,7 @@ class CLBase {
   std::vector<std::string> help_strings_;
 
   // kg: kg added a new field to specify the host id.
-  int host_id_; 
+  int host_id_ = -1; 
 
   int scale_ = -1;
   int degree_ = 16;

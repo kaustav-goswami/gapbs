@@ -196,7 +196,9 @@ int main(int argc, char* argv[]) {
   if (!cli.ParseArgs())
     return -1;
   WeightedBuilder b(cli);
-  WGraph g = b.MakeGraph();
+  // kg: invoking makegraph with a valid host_id
+  assert(cli.host_id() >= 0);
+  WGraph g = b.MakeGraph(cli.host_id());
   SourcePicker<WGraph> sp(g, cli.start_vertex());
   auto SSSPBound = [&sp, &cli] (const WGraph &g) {
     return DeltaStep(g, sp.PickNext(), cli.delta());
